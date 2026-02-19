@@ -815,14 +815,20 @@ def save_sentiment(db_path: str, ticker: str, source: str, score: float, count: 
         conn.close()
 
 
-def get_sentiment_history(db_path: str, ticker: str, limit: int = 100) -> list[dict]:
-    """Fetch historical sentiment scores for a ticker."""
+def get_sentiment_history(db_path: str, ticker: Optional[str] = None, limit: int = 100) -> list[dict]:
+    """Fetch historical sentiment scores (filtered by ticker or all)."""
     conn = get_connection(db_path)
     try:
-        rows = conn.execute(
-            "SELECT * FROM sentiment_history WHERE ticker = ? ORDER BY timestamp DESC LIMIT ?",
-            (ticker.upper(), limit)
-        ).fetchall()
+        if ticker:
+            rows = conn.execute(
+                "SELECT * FROM sentiment_history WHERE ticker = ? ORDER BY timestamp DESC LIMIT ?",
+                (ticker.upper(), limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM sentiment_history ORDER BY timestamp DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
