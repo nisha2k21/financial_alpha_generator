@@ -11,268 +11,94 @@
 
 ---
 
-## 🧠 What Is This?
+## 🔍 What is this?
+The **AI Financial Alpha Generator** is a next-generation decision-support tool for traders and analysts. It leverages **Gemini 1.5 Pro** and **Retrieval-Augmented Generation (RAG)** to transform raw financial news into actionable, citation-backed alpha signals. 
 
-Traditional alpha generation relies on hand-crafted rules and lagging indicators. This project
-replaces that with a **Retrieval-Augmented Generation (RAG)** architecture: financial news is
-ingested, embedded into a vector store, and queried by Gemini 1.5 Pro — which acts as a
-**senior quantitative analyst** — to generate structured, evidence-based trading signals.
-
-The result: scalable, explainable, citation-backed alpha signals that blend LLM reasoning
-with quantitative technical confirmation (RSI, MA20, volume analysis).
+Unlike traditional platforms that rely solely on lagging indicators, this engine reads the news through the eyes of a senior quantitative analyst, cross-references it with technical data, and provides structured trade recommendations with explicit reasoning.
 
 ---
 
-## 🏗️ Architecture
+## ⚙️ How it Works
+The application follows a 4-stage intelligent pipeline:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     AI Financial Alpha Generator                            │
-│                                                                             │
-│  ┌──────────┐   ┌───────────┐   ┌────────────┐   ┌────────────────────┐   │
-│  │ NewsAPI  │   │ yfinance  │   │  TextBlob  │   │  ta (RSI/MA20/Vol) │   │
-│  └────┬─────┘   └─────┬─────┘   └─────┬──────┘   └────────┬───────────┘   │
-│       │               │               │                    │               │
-│       ▼               ▼               ▼                    ▼               │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │              INGESTION LAYER  (ingestion.py)                        │   │
-│  │  Fetch news → format as LangChain Documents → compute indicators    │   │
-│  └──────────────────────────┬──────────────────────────────────────────┘   │
-│                             │                                               │
-│                             ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │           EMBEDDINGS LAYER  (embeddings.py)                         │   │
-│  │  Chunk: 500 tokens / 50-token overlap                               │   │
-│  │  Sentiment: TextBlob polarity scored per chunk                      │   │
-│  │  Embed: Google models/embedding-001 → ChromaDB                      │   │
-│  └──────────────────────────┬──────────────────────────────────────────┘   │
-│                             │                                               │
-│                             ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │              RAG PIPELINE  (rag_pipeline.py)                        │   │
-│  │  Retriever: ChromaDB top-5 similarity search                        │   │
-│  │  LLM: Gemini 1.5 Pro (temp=0.1, quant analyst system prompt)       │   │
-│  │  Output: Strong Buy / Buy / Neutral / Sell / Strong Sell            │   │
-│  └──────────────────────────┬──────────────────────────────────────────┘   │
-│                             │                                               │
-│                             ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │            ALPHA ENGINE  (alpha_engine.py)                          │   │
-│  │  Parse response → AlphaSignal dataclass                             │   │
-│  │  Adjust confidence: RSI + volume technical confirmation             │   │
-│  │  Persist to SQLite (BigQuery-compatible schema)                     │   │
-│  └──────────────────────────┬──────────────────────────────────────────┘   │
-│                             │                                               │
-│                             ▼                                               │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │          STREAMLIT DASHBOARD  (app.py)  — 4 Pages                   │   │
-│  │  1. Alpha Dashboard  2. AI Research  3. History  4. How It Works    │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+1.  **Ingestion Layer**: Real-time news is fetched via NewsAPI and financial data via yfinance. The system calculates core technical indicators (RSI, MA20, Volume Change).
+2.  **Semantic Processing**: Raw text is chunked and embedded into a **ChromaDB** vector store using Google's 768-dimensional embedding models. Each chunk is also scored for sentiment using TextBlob.
+3.  **RAG Pipeline**: When you analyze a ticker, Gemini 1.5 Pro performs a semantic search across the news embeddings. It retrieves the most relevant catalysts, risks, and narratives to form a basis for its analysis.
+4.  **Signal Generation**: The LLM output is parsed into a structured `AlphaSignal`. This signal is then "tempered" by the technical engine—if the AI is bullish but RSI indicates an overbought state, the confidence score is automatically adjusted to prevent "hallucinated" buys.
+
+---
+
+## 🏗️ Core Functionality
+The application is organized into 5 intuitive modules:
+
+1.  **📊 Alpha Dashboard**: View live signals (Strong Buy to Strong Sell), confidence percentages, and citation-backed reasoning. Execute one-click virtual paper trades with automated stop-loss and take-profit targets.
+2.  **🧠 AI Research Assistant**: A dedicated RAG interface where you can ask complex questions (e.g., *"How do NVDA's Q3 guidance and recent AI chip delays impact the short-term signal?"*) and get cited answers.
+3.  **💰 Paper Trading**: Manage your virtual $100k portfolio. Track open positions, unrealized PnL, and win rates in real-time.
+4.  **🗄️ Signal History**: A permanent SQLite audit trail of every signal ever generated, allowing you to export data and review performance over time.
+5.  **❓ How It Works**: An interactive map of the pipeline architecture and scaling guides.
+
+---
+
+## 💎 How it Differs from Other Tools
+*   **Explainable AI (XAI)**: Most black-box AI tools give you a "Buy" signal without context. This tool gives you the exact news headlines it used to reach that conclusion.
+*   **Narrative + Technical Hybrid**: It doesn't just look at charts. It understands the "Story" (Earnings, M&A, Product Launches) and uses charts only to confirm entries.
+*   **Zero Retraining Needed**: By using RAG, the "brain" stays fresh. As soon as a news article is ingested, the AI knows about it—no fine-tuning required.
+*   **Local Privacy**: Uses ChromaDB for local vector storage, ensuring your research history stays on your machine.
+
+---
+
+## 💡 Key Insights You Get
+*   **Catalyst Identification**: Quickly find the *reason* behind a price move without reading 50 articles.
+*   **Sentiment Divergence**: Spot when the news is purely hype but technicals (like declining volume) suggest a reversal.
+*   **Risk-Adjusted Parameters**: Get precise, volatility-aware Entry, Stop-Loss, and Take-Profit levels for every signal.
+
+---
+
+## 🎯 Why & When to Use This?
+**Use this when:**
+*   You are overwhelmed by financial news and need a summary of what actually matters.
+*   You want to verify your "gut feel" with a senior AI analyst that ignores emotional bias.
+*   You need to back-audit your trading decisions using the Signal History.
+
+**Why use it?**
+To reduce cognitive load. Instead of spending 2 hours researching a ticker, you get a institutional-grade summary and technical confirmation in under 30 seconds.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone the repo
-
+### 1. Installation
 ```bash
 git clone https://github.com/yourusername/financial-alpha-generator.git
 cd financial-alpha-generator
-```
-
-### 2. Install dependencies
-
-```bash
 pip install -r requirements.txt
-python -m textblob.download_corpora   # Download TextBlob English corpus
+python -m textblob.download_corpora
 ```
 
-### 3. Configure API keys
-
-```bash
-cp .env.template .env
-```
-
+### 2. Configuration
 Edit `.env`:
-
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
 NEWS_API_KEY=your_newsapi_key_here
 ```
 
-> **Demo mode:** Leave the keys blank — the app works with sample data and pre-built mock
-> signals for AAPL, GOOGL, TSLA, MSFT, NVDA.
-
-### 4. Run the dashboard
-
+### 3. Run
 ```bash
-Open [http://localhost:8501](http://localhost:8501) in your browser.
-
----
-
-## 🐳 Docker Deployment
-
-For universal deployment (GCP, AWS, Azure, DigitalOcean), use the included Docker configuration:
-
-### 1. Build the image
-```bash
-docker build -t alpha-generator .
+streamlit run app.py
 ```
-
-### 2. Run with Docker Compose
-```bash
-docker-compose up -d
-```
-The app will be available at `http://localhost:8501`. Ensure your `.env` file is populated.
-
----
-
-## ☁️ Streamlit Community Cloud
-
-The easiest way to deploy for free:
-
-1. Fork this repository to your GitHub account.
-2. Sign in to [Streamlit Cloud](https://share.streamlit.io/).
-3. Click **"New app"** and select your repository.
-4. **Crucial:** Go to **Advanced settings > Secrets** and paste your `.env` contents:
-   ```toml
-   GEMINI_API_KEY = "your_key"
-   NEWS_API_KEY = "your_key"
-   REDDIT_CLIENT_ID = "your_id"
-   # ... etc
-   ```
-5. Click **Deploy!**
-
----
-
-## 📸 Screenshots
-
-| Alpha Dashboard | AI Research Assistant |
-|---|---|
-| *(screenshot placeholder)* | *(screenshot placeholder)* |
-
-| Signal History | How It Works |
-|---|---|
-| *(screenshot placeholder)* | *(screenshot placeholder)* |
 
 ---
 
 ## 🛠️ Tech Stack
-
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
-| **LLM** | Gemini 1.5 Pro | Alpha signal generation with citation-backed reasoning |
-| **RAG Framework** | LangChain LCEL | Retrieval chain, prompt templates, output parsers |
-| **Vector Store** | ChromaDB | Local embedding storage & semantic similarity search |
-| **Embeddings** | Google models/embedding-001 | 768-dim document embeddings |
-| **Price Data** | yfinance | 6-month OHLCV historical data |
-| **News** | NewsAPI | Real-time financial news ingestion |
-| **Technical Analysis** | `ta` library | RSI(14), MA20, Volume Change % |
-| **Sentiment** | TextBlob | Per-chunk polarity scoring (−1 to +1) |
-| **Database** | SQLite (BigQuery schema) | Signal persistence & audit trail |
-| **Frontend** | Streamlit + Plotly | Interactive dashboard |
-| **Testing** | pytest | 52 unit tests, no API keys required |
-
----
-
-## 📁 Project Structure
-
-```
-financial_alpha_generator/
-├── app.py                     # Streamlit 4-page dashboard
-├── requirements.txt           # Pinned dependencies
-├── .env.template              # API key template
-├── README.md
-│
-├── src/
-│   ├── __init__.py
-│   ├── alpha_engine.py        # AlphaSignal dataclass + orchestration
-│   ├── database.py            # SQLite (news, prices, signals tables)
-│   ├── embeddings.py          # Chunking + TextBlob sentiment + ChromaDB
-│   ├── ingestion.py           # NewsAPI + yfinance + RSI/MA20/vol
-│   └── rag_pipeline.py        # Gemini 1.5 Pro LCEL chain
-│
-├── tests/
-│   └── test_pipeline.py       # 52 unit tests (8 test classes)
-│
-└── data/
-    └── sample_news.json       # Fallback news for demo mode
-```
-
----
-
-## 📊 Signal Schema
-
-```python
-@dataclass
-class AlphaSignal:
-    ticker:           str     # "AAPL"
-    signal_strength:  int     # 1=Strong Sell ... 5=Strong Buy
-    direction:        str     # "Strong Buy" | "Buy" | "Neutral" | "Sell" | "Strong Sell"
-    confidence_score: float   # 0.0–1.0 (LLM + technical confirmation)
-    reasoning:        str     # Full rationale with article citations
-    news_citations:   list    # Article headlines used as evidence
-    ticker_rsi:       float   # RSI(14) at signal time
-    ticker_ma20:      float   # 20-day moving average
-    vol_change_pct:   float   # Volume % vs 20-day average
-    generated_at:     str     # ISO-8601 UTC timestamp
-    model_version:    str     # "gemini-1.5-pro" | "mock"
-```
-
----
-
-## ☁️ Scaling to BigQuery
-
-The SQLite schema mirrors BigQuery column types. To push to production:
-
-```bash
-# Export signals
-streamlit run app.py  # then use Signal History → Export CSV
-
-# Load to BigQuery
-bq load \
-  --source_format=CSV \
-  --autodetect \
-  my-project:alpha_signals.signals \
-  alpha_signals_2024-01-01.csv
-```
-
-For streaming ingestion, replace `database.py` with a `google-cloud-bigquery` client using
-the same column definitions. See `database.py` for the BigQuery-compatible CREATE TABLE DDL.
-
----
-
-## 🧪 Running Tests
-
-```bash
-pytest tests/test_pipeline.py -v
-# 52 passed in ~6 seconds (no API keys required)
-```
-
-Test coverage: sample news loading, document chunking, RSI/MA20 computation,
-TextBlob sentiment, signal parser, AlphaSignal dataclass, technical confidence scoring,
-database CRUD for all 3 tables.
-
----
-
-## 💡 Why This Project?
-
-Traditional quantitative alpha generation relies on:
-- **Static rules** (e.g., RSI < 30 = buy) that don't adapt to market narratives
-- **Lagging indicators** that miss fast-moving news-driven catalysts
-- **Opaque signals** without explainable reasoning
-
-This project demonstrates how **RAG fundamentally changes alpha generation**:
-
-1. **Evidence-based reasoning** — Gemini cites specific news headlines, not just historical price patterns
-2. **Adaptable context** — the vector store updates with fresh news; no retraining needed
-3. **Hybrid scoring** — LLM confidence is refined by RSI and volume confirmation, reducing hallucination risk
-4. **Audit trail** — every signal stored with its source articles, model version, and timestamp
+| **LLM** | Gemini 1.5 Pro | Deep reasoning & alpha generation |
+| **Vector Store** | ChromaDB | Semantic search & news retrieval |
+| **Data** | yfinance & NewsAPI | Market data & real-time narratives |
+| **State** | LangChain LCEL | Pipeline orchestration |
+| **DB** | SQLite | Persistent audit trail |
 
 ---
 
 ## 📄 License
-
 MIT © 2024 Nisha Kumari

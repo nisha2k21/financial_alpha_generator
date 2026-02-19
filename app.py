@@ -30,8 +30,7 @@ load_dotenv(ROOT_DIR / ".env")
 from src.alpha_engine import run_alpha_pipeline, AlphaSignal
 from src.database import (
     init_db, get_signals, get_articles, get_prices,
-    get_paper_portfolio, get_paper_trades, get_alerts,
-    get_sentiment_history, get_journals, get_weekly_reviews
+    get_paper_portfolio, get_paper_trades
 )
 from src.ingestion import (
     fetch_news, fetch_stock_data,
@@ -39,10 +38,6 @@ from src.ingestion import (
     load_sample_news,
 )
 from src.paper_trader import PaperPortfolio
-from src.backtester import run_backtest
-from src.alert_engine import create_price_alert, check_all_alerts
-from src.sentiment_tracker import SentimentTracker
-from src.ai_coach import AICoach
 from src.embeddings import get_or_create_vectorstore
 from src.rag_pipeline import build_rag_chain, query_rag
 
@@ -310,8 +305,6 @@ def _init_state():
         "articles":   {},      # ticker → list[dict]
         "rag_history": [],     # list[{question, answer, ticker, citations}]
         "paper_portfolio": PaperPortfolio(DB_PATH),
-        "sentiment_tracker": SentimentTracker(DB_PATH),
-        "ai_coach": AICoach(DB_PATH),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -436,14 +429,10 @@ st.markdown(
 )
 st.divider()
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Alpha Dashboard",
     "🧠 AI Research Assistant",
     "💰 Paper Trading",
-    "⏪ Backtest",
-    "🔔 Price Alerts",
-    "🌡️ Sentiment Heatmap",
-    "📔 Trading Journal & Coach",
     "🗄️ Signal History",
     "❓ How It Works",
 ])
@@ -850,201 +839,10 @@ with tab3:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 4 — BACKTEST
+# PAGE 4 — SIGNAL HISTORY
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab4:
-    st.markdown('<div class="section-header">⏪ Technical Strategy Backtester</div>', unsafe_allow_html=True)
-    st.markdown("<p style='color:#64748b;'>Simulate institutional technical strategies over historical data.</p>", unsafe_allow_html=True)
-    
-    b1, b2, b3 = st.columns([2, 2, 2])
-    with b1:
-        bt_ticker = st.selectbox("Ticker", ALL_TICKERS, index=1)
-        bt_start = st.date_input("Start Date", date.today() - timedelta(days=365*2))
-    with b2:
-        bt_size = st.slider("Position Size %", 5, 50, 10, 5)
-        bt_capital = st.number_input("Initial Capital", 10000, 1000000, 100000)
-    with b3:
-        bt_sl = st.slider("Stop Loss (ATR Mult)", 1.0, 3.0, 1.5, 0.5)
-        bt_tp = st.slider("Take Profit (ATR Mult)", 2.0, 5.0, 2.5, 0.5)
-
-    if st.button("🚀 Run Walk-Forward Simulation", type="primary"):
-        with st.spinner("Simulating..."):
-            try:
-                res = run_backtest(
-                    ticker=bt_ticker,
-                    start_date=bt_start.strftime("%Y-%m-%d"),
-                    end_date=date.today().strftime("%Y-%m-%d"),
-                    initial_capital=bt_capital,
-                    position_size_pct=bt_size,
-                    stop_loss_mult=bt_sl,
-                    take_profit_mult=bt_tp
-                )
-                
-                # Metrics
-                r1, r2, r3, r4 = st.columns(4)
-                r1.metric("Final Capital", f"${res.final_capital:,.0f}", f"{res.total_return_pct:+.1f}%")
-                r2.metric("CAGR", f"{res.cagr:.1f}%")
-                r3.metric("Sharpe Ratio", f"{res.sharpe_ratio:.2f}")
-                r4.metric("Max Drawdown", f"{res.max_drawdown:.1f}%")
-                
-                # Equity Chart
-                df_eq = pd.DataFrame(res.equity_curve)
-                fig = px.line(df_eq, x="date", y=["equity", "benchmark"], 
-                               title=f"{bt_ticker} Strategy vs Benchmark",
-                               color_discrete_map={"equity": "#3b82f6", "benchmark": "#94a3b8"})
-                fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
-                st.plotly_chart(fig, use_container_width=True)
-                
-                st.dataframe(pd.DataFrame(res.trade_log), use_container_width=True)
-            except Exception as e:
-                st.error(f"Backtest error: {e}")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 5 — PRICE ALERTS
-# ══════════════════════════════════════════════════════════════════════════════
-
-with tab5:
-    st.markdown('<div class="section-header">🔔 Real-Time Price Alerts</div>', unsafe_allow_html=True)
-    
-    a1, a2, a3, a4 = st.columns([2, 2, 2, 3])
-    with a1:
-        at_ticker = st.selectbox("Ticker", ALL_TICKERS, key="at_ticker")
-    with a2:
-        at_type = st.selectbox("Type", ["PRICE_ABOVE", "PRICE_BELOW"])
-    with a3:
-        at_val = st.number_input("Trigger Price", value=150.0)
-    with a4:
-        at_msg = st.text_input("Custom Message", "Target reached!")
-    
-    if st.button("➕ Set Alert"):
-        create_price_alert(DB_PATH, at_ticker, at_type, at_val, at_msg)
-        st.success(f"Alert set for {at_ticker} {at_type} {at_val}")
-
-    st.divider()
-    
-    # Check Alerts Button
-    if st.button("⚡ Check Active Alerts Now"):
-        triggered = check_all_alerts(DB_PATH)
-        if triggered:
-            for t in triggered:
-                st.toast(t["message"], icon="🔔")
-                st.warning(t["message"])
-        else:
-            st.info("No alerts triggered in this check.")
-
-    # Active Alerts Table
-    st.markdown("#### ⏳ Active Alerts")
-    active_alerts = get_alerts(DB_PATH, active_only=True)
-    if active_alerts:
-        df_a = pd.DataFrame(active_alerts)[["ticker", "alert_type", "trigger_value", "created_at"]]
-        st.dataframe(df_a, use_container_width=True)
-    else:
-        st.write("No active alerts.")
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 6 — SENTIMENT HEATMAP
-# ══════════════════════════════════════════════════════════════════════════════
-
-with tab6:
-    st.markdown('<div class="section-header">🌡️ Global Sentiment Heatmap</div>', unsafe_allow_html=True)
-    st.markdown("<p style='color:#64748b;'>Aggregated social sentiment from Reddit, News, and AI context.</p>", unsafe_allow_html=True)
-    
-    # Calculate sentiment for all tickers
-    if st.button("📊 Update Sentiment Heatmap"):
-        with st.spinner("Scanning social & news..."):
-            for t in ALL_TICKERS:
-                st.session_state.sentiment_tracker.get_combined_sentiment(t)
-    
-    # Fetch latest scores
-    scores = get_sentiment_history(DB_PATH)
-    if scores:
-        df_s = pd.DataFrame(scores)
-        # Get latest per ticker
-        latest_s = df_s.sort_values("timestamp").groupby("ticker").last().reset_index()
-        
-        fig = px.treemap(latest_s, path=["ticker"], values=[1]*len(latest_s),
-                         color="sentiment_score",
-                         color_continuous_scale="RdYlGn",
-                         range_color=[-100, 100],
-                         title="Current Market Sentiment (Reddit + News)")
-        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.dataframe(latest_s[["ticker", "sentiment_score", "source_counts", "timestamp"]], use_container_width=True)
-    else:
-        st.info("No sentiment data yet. Click 'Update' to begin scanning.")
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 7 — AI TRADING JOURNAL & COACH
-# ══════════════════════════════════════════════════════════════════════════════
-
-with tab7:
-    st.markdown('<div class="section-header">📔 AI Trading Journal & Coach</div>', unsafe_allow_html=True)
-    
-    coach_tab1, coach_tab2, coach_tab3 = st.tabs(["Self-Reflection", "Weekly Review", "Trading DNA"])
-    
-    with coach_tab1:
-        st.markdown("#### 🤔 Why did you take that trade?")
-        recent_trades = get_paper_trades(DB_PATH)
-        if not recent_trades:
-            st.info("No trades to reflect on.")
-        else:
-            t_ids = [f"{t['ticker']} ({t['entry_date'][:10]}) - {t['trade_id'][:8]}" for t in recent_trades]
-            sel_t_idx = st.selectbox("Select Trade", range(len(t_ids)), format_func=lambda i: t_ids[i])
-            sel_t = recent_trades[sel_t_idx]
-            
-            # Check if journal exists
-            journals = get_journals(DB_PATH, trade_id=sel_t["trade_id"])
-            if journals:
-                st.markdown(f'<div class="rag-box">{journals[0]["content"]}</div>', unsafe_allow_html=True)
-            else:
-                if st.button("🤖 Generate Gemini Critique"):
-                    with st.spinner("AI is analyzing your strategy..."):
-                        res = st.session_state.ai_coach.generate_journal_entry(sel_t)
-                        st.markdown(f'<div class="rag-box">{res}</div>', unsafe_allow_html=True)
-    
-    with coach_tab2:
-        st.markdown("#### 📅 Weekly Performance Review")
-        if st.button("📈 Run Weekly Analysis"):
-            with st.spinner("Gemini is reviewing your week..."):
-                res = st.session_state.ai_coach.generate_weekly_review()
-                st.markdown(f'<div class="rag-box">{res}</div>', unsafe_allow_html=True)
-        
-        st.divider()
-        prev_reviews = get_weekly_reviews(DB_PATH)
-        if prev_reviews:
-            for rev in reversed(prev_reviews):
-                with st.expander(f"Review: {rev['week_start']} to {rev['week_end']}"):
-                    st.write(rev["content"])
-
-    with coach_tab3:
-        st.markdown("#### 🧬 Trading DNA")
-        dna = st.session_state.ai_coach.calculate_trading_dna()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Risk Profile", dna.get("Risk", "N/A"))
-        c2.metric("Edge Quality", f"{dna.get('Accuracy', 0):.1f}/100")
-        c3.metric("Discipline Score", f"{dna.get('Discipline', 0):.1f}/100")
-        
-        # DNA Chart
-        df_dna = pd.DataFrame({
-            "Metric": ["Risk", "Edge", "Discipline", "Timing", "Sizing"],
-            "Value": [dna["risk_score"], dna["edge_score"], dna["discipline_score"], 7.5, 6.0]
-        })
-        fig = px.line_polar(df_dna, r="Value", theta="Metric", line_close=True)
-        fig.update_traces(fill="toself", fillcolor="rgba(59,130,246,0.3)")
-        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 8 — SIGNAL HISTORY
-# ══════════════════════════════════════════════════════════════════════════════
-
-with tab8:
     st.markdown('<div class="section-header">🗄️ Signal History — SQLite Store</div>', unsafe_allow_html=True)
 
     # Fetch all signals from DB
@@ -1113,10 +911,10 @@ with tab8:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 9 — HOW IT WORKS
+# PAGE 5 — HOW IT WORKS
 # ══════════════════════════════════════════════════════════════════════════════
 
-with tab9:
+with tab5:
     st.markdown('<div class="section-header">❓ How the Alpha Pipeline Works</div>', unsafe_allow_html=True)
     
     # ── Pipeline diagram ──────────────────────────────────────────────────────
@@ -1127,7 +925,6 @@ with tab9:
         ("🤖", "Gemini 1.5", "Alpha Analyst"),
         ("📊", "Technical", "Signal Check"),
         ("💰", "Paper Trade", "Virtual Exec"),
-        ("📔", "AI Coach", "DNA Critique"),
     ]
 
     pipe_cols = st.columns(len(steps))

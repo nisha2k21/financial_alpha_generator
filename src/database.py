@@ -127,55 +127,8 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 );
 """
 
-# ─── Schema: alerts ───────────────────────────────────────────────────────────
+# ─── Legacy schemas (backward compat) ────────────────────────────────────────
 
-CREATE_ALERTS_TABLE = """
-CREATE TABLE IF NOT EXISTS alerts (
-    alert_id            TEXT    PRIMARY KEY,
-    ticker              TEXT    NOT NULL,
-    alert_type          TEXT    NOT NULL, -- PRICE_ABOVE, RSI_OVERBOUGHT, etc.
-    trigger_value       REAL    NOT NULL,
-    message             TEXT,
-    is_active           INTEGER DEFAULT 1,
-    created_at          TEXT    NOT NULL,
-    triggered_at        TEXT,
-    times_triggered     INTEGER DEFAULT 0
-);
-"""
-
-# ─── Schema: coaching & sentiment ─────────────────────────────────────────────
-
-CREATE_JOURNALS_TABLE = """
-CREATE TABLE IF NOT EXISTS trade_journals (
-    journal_id    TEXT    PRIMARY KEY,
-    trade_id      TEXT    NOT NULL,
-    ticker        TEXT    NOT NULL,
-    content       TEXT    NOT NULL,
-    created_at    TEXT    NOT NULL,
-    FOREIGN KEY(trade_id) REFERENCES paper_trades(trade_id)
-);
-"""
-
-CREATE_WEEKLY_REVIEWS_TABLE = """
-CREATE TABLE IF NOT EXISTS weekly_reviews (
-    review_id     TEXT    PRIMARY KEY,
-    start_date    TEXT    NOT NULL,
-    end_date      TEXT    NOT NULL,
-    content       TEXT    NOT NULL,
-    created_at    TEXT    NOT NULL
-);
-"""
-
-CREATE_SENTIMENT_HISTORY_TABLE = """
-CREATE TABLE IF NOT EXISTS sentiment_history (
-    sentiment_id  TEXT    PRIMARY KEY,
-    ticker        TEXT    NOT NULL,
-    source        TEXT    NOT NULL, -- REDDIT, NEWS, COMBINED
-    score         REAL    NOT NULL,
-    mention_count INTEGER DEFAULT 0,
-    timestamp     TEXT    NOT NULL
-);
-"""
 
 # ─── Legacy schemas (backward compat) ────────────────────────────────────────
 
@@ -214,8 +167,6 @@ CREATE_INDICES = [
     "CREATE INDEX IF NOT EXISTS idx_signals_generated ON signals(generated_at);",
     "CREATE INDEX IF NOT EXISTS idx_paper_trades_ticker ON paper_trades(ticker);",
     "CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(outcome);",
-    "CREATE INDEX IF NOT EXISTS idx_alerts_ticker ON alerts(ticker);",
-    "CREATE INDEX IF NOT EXISTS idx_sentiment_ticker_time ON sentiment_history(ticker, timestamp);",
     # Legacy
     "CREATE INDEX IF NOT EXISTS idx_alpha_ticker ON alpha_signals(ticker);",
     "CREATE INDEX IF NOT EXISTS idx_ingestion_ticker ON news_ingestion_log(ticker);",
@@ -248,10 +199,6 @@ def init_db(db_path: str) -> None:
             CREATE_SIGNALS_TABLE,
             CREATE_PAPER_PORTFOLIO_TABLE,
             CREATE_PAPER_TRADES_TABLE,
-            CREATE_ALERTS_TABLE,
-            CREATE_JOURNALS_TABLE,
-            CREATE_WEEKLY_REVIEWS_TABLE,
-            CREATE_SENTIMENT_HISTORY_TABLE,
             CREATE_ALPHA_SIGNALS_LEGACY,
             CREATE_NEWS_LOG_LEGACY,
         ]:
@@ -728,188 +675,6 @@ def get_paper_trades(db_path: str, outcome: Optional[str] = None) -> list[dict]:
             params.append(outcome)
         sql += " ORDER BY entry_date DESC"
         rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-# ─── Alerts CRUD ──────────────────────────────────────────────────────────────
-
-def save_alert(db_path: str, alert: dict) -> str:
-    """Save a new alert or update an existing one."""
-    alert_id = alert.get("alert_id") or str(uuid.uuid4())
-    ts = datetime.now(timezone.utc).isoformat()
-    conn = get_connection(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO alerts
-              (alert_id, ticker, alert_type, trigger_value, message,
-               is_active, created_at, triggered_at, times_triggered)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                alert_id, alert["ticker"], alert["alert_type"],
-                alert["trigger_value"], alert.get("message"),
-                alert.get("is_active", 1), alert.get("created_at", ts),
-                alert.get("triggered_at"), alert.get("times_triggered", 0)
-            )
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return alert_id
-
-
-def get_alerts(db_path: str, ticker: Optional[str] = None, active_only: bool = False) -> list[dict]:
-    """Fetch alerts, optionally filtered by ticker or active status."""
-    conn = get_connection(db_path)
-    try:
-        sql = "SELECT * FROM alerts"
-        clauses = []
-        params = []
-        if ticker:
-            clauses.append("ticker = ?")
-            params.append(ticker.upper())
-        if active_only:
-            clauses.append("is_active = 1")
-        
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
-        
-        sql += " ORDER BY created_at DESC"
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-def delete_alert(db_path: str, alert_id: str) -> None:
-    """Permanently remove an alert."""
-    conn = get_connection(db_path)
-    try:
-        conn.execute("DELETE FROM alerts WHERE alert_id = ?", (alert_id,))
-        conn.commit()
-    finally:
-        conn.close()
-
-
-# ─── Sentiment CRUD ───────────────────────────────────────────────────────────
-
-def save_sentiment(db_path: str, ticker: str, source: str, score: float, count: int = 0) -> None:
-    """Record a sentiment snapshot."""
-    sentiment_id = str(uuid.uuid4())
-    ts = datetime.now(timezone.utc).isoformat()
-    conn = get_connection(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT INTO sentiment_history
-              (sentiment_id, ticker, source, score, mention_count, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (sentiment_id, ticker.upper(), source, score, count, ts)
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def get_sentiment_history(db_path: str, ticker: Optional[str] = None, limit: int = 100) -> list[dict]:
-    """Fetch historical sentiment scores (filtered by ticker or all)."""
-    conn = get_connection(db_path)
-    try:
-        if ticker:
-            rows = conn.execute(
-                "SELECT * FROM sentiment_history WHERE ticker = ? ORDER BY timestamp DESC LIMIT ?",
-                (ticker.upper(), limit)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM sentiment_history ORDER BY timestamp DESC LIMIT ?",
-                (limit,)
-            ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-# ─── Coaching CRUD ────────────────────────────────────────────────────────────
-
-def save_journal_entry(db_path: str, journal: dict) -> str:
-    """Save a Gemini-generated journal entry."""
-    journal_id = journal.get("journal_id") or str(uuid.uuid4())
-    ts = datetime.now(timezone.utc).isoformat()
-    conn = get_connection(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO trade_journals
-              (journal_id, trade_id, ticker, content, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (journal_id, journal["trade_id"], journal["ticker"], 
-             journal["content"], journal.get("created_at", ts))
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return journal_id
-
-
-def get_journals(db_path: str, ticker: Optional[str] = None, trade_id: Optional[str] = None) -> list[dict]:
-    """Fetch trade journal entries."""
-    conn = get_connection(db_path)
-    try:
-        sql = "SELECT * FROM trade_journals"
-        params = []
-        conditions = []
-        if ticker:
-            conditions.append("ticker = ?")
-            params.append(ticker)
-        if trade_id:
-            conditions.append("trade_id = ?")
-            params.append(trade_id)
-        
-        if conditions:
-            sql += " WHERE " + " AND ".join(conditions)
-        
-        sql += " ORDER BY created_at DESC"
-        rows = conn.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-def save_weekly_review(db_path: str, review: dict) -> str:
-    """Save/update a weekly performance summary."""
-    review_id = review.get("review_id") or str(uuid.uuid4())
-    ts = datetime.now(timezone.utc).isoformat()
-    conn = get_connection(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO weekly_reviews
-              (review_id, start_date, end_date, content, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (review_id, review["start_date"], review["end_date"], 
-             review["content"], ts)
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    return review_id
-
-
-def get_weekly_reviews(db_path: str, limit: int = 10) -> list[dict]:
-    """Fetch the latest weekly reviews."""
-    conn = get_connection(db_path)
-    try:
-        rows = conn.execute(
-            "SELECT * FROM weekly_reviews ORDER BY created_at DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
