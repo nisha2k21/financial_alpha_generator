@@ -40,18 +40,27 @@ def run_backtest(
     logger.info(f"Starting backtest for {ticker} from {start_date} to {end_date}")
     
     # 1. Load Data
-    df = yf.download(ticker, start=start_date, end=end_date, progress=False)
+    df = yf.download(ticker, start=start_date, end=end_date, 
+                     progress=False, multi_level_index=False, auto_adjust=True)
     if df.empty or len(df) < 50:
         raise ValueError(f"Insufficient data for {ticker} in range {start_date} to {end_date}")
 
-    # Standardize column names (handle MultiIndex if any)
+    # Standardize column names (robust MultiIndex handling)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     
-    # 2. Indicators
-    close = df["Close"]
-    high = df["High"]
-    low = df["Low"]
+    # Ensure column names are clean and unique strings
+    df.columns = [str(c).strip() for c in df.columns]
+    
+    # 2. Indicators (Ensure we work with 1D series)
+    close = df["Close"].squeeze()
+    high = df["High"].squeeze()
+    low = df["Low"].squeeze()
+    
+    # Cast to float series to be safe
+    close = pd.Series(close).astype(float)
+    high = pd.Series(high).astype(float)
+    low = pd.Series(low).astype(float)
 
     # RSI
     delta = close.diff()
@@ -112,18 +121,24 @@ def run_backtest(
             tp_hit = False
             reversed_sig = False
             
+            # Indicators as floats to prevent Series-related errors
+            c_macd = float(curr["MACD"])
+            c_macd_sig = float(curr["MACD_Signal"])
+            p_macd = float(prev["MACD"])
+            p_macd_sig = float(prev["MACD_Signal"])
+
             # SL/TP logic
             if position["type"] == "LONG":
                 if curr_price <= position["sl"]: sl_hit = True
                 elif curr_price >= position["tp"]: tp_hit = True
-                # Signal reversal (MACD cross down or RSI overbought)
-                if curr["MACD"] < curr["MACD_Signal"] and prev["MACD"] >= prev["MACD_Signal"]:
+                # Signal reversal (MACD cross down)
+                if c_macd < c_macd_sig and p_macd >= p_macd_sig:
                     reversed_sig = True
             else: # SHORT
                 if curr_price >= position["sl"]: sl_hit = True
                 elif curr_price <= position["tp"]: tp_hit = True
-                # Signal reversal (MACD cross up or RSI oversold)
-                if curr["MACD"] > curr["MACD_Signal"] and prev["MACD"] <= prev["MACD_Signal"]:
+                # Signal reversal (MACD cross up)
+                if c_macd > c_macd_sig and p_macd <= p_macd_sig:
                     reversed_sig = True
 
             if sl_hit or tp_hit or reversed_sig:
@@ -160,10 +175,16 @@ def run_backtest(
 
         # Check for entry if no position
         if not position:
+            c_macd = float(curr["MACD"])
+            c_macd_sig = float(curr["MACD_Signal"])
+            p_macd = float(prev["MACD"])
+            p_macd_sig = float(prev["MACD_Signal"])
+            c_rsi = float(curr["RSI"])
+
             # BUY Signal: MACD cross up OR RSI < 30
-            long_sig = (curr["MACD"] > curr["MACD_Signal"] and prev["MACD"] <= prev["MACD_Signal"]) or (curr["RSI"] < 30)
+            long_sig = (c_macd > c_macd_sig and p_macd <= p_macd_sig) or (c_rsi < 30)
             # SELL Signal: MACD cross down OR RSI > 70
-            short_sig = (curr["MACD"] < curr["MACD_Signal"] and prev["MACD"] >= prev["MACD_Signal"]) or (curr["RSI"] > 70)
+            short_sig = (c_macd < c_macd_sig and p_macd >= p_macd_sig) or (c_rsi > 70)
             
             # Additional trend filter: MA20 > MA50 for Long, MA20 < MA50 for Short
             trend_up = curr["MA20"] > curr["MA50"]
