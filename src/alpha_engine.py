@@ -69,25 +69,7 @@ STRENGTH_TO_DIRECTION: dict[int, str] = {v: k.title() for k, v in DIRECTION_TO_S
 @dataclass
 class AlphaSignal:
     """
-    Structured alpha signal produced by the end-to-end RAG pipeline.
-
-    Fields
-    ------
-    ticker          : Stock ticker symbol (e.g. "AAPL")
-    signal_strength : Integer 1–5
-                      1 = Strong Sell, 2 = Sell, 3 = Neutral,
-                      4 = Buy,         5 = Strong Buy
-    direction       : Human-readable label ("Strong Buy", "Buy", etc.)
-    confidence_score: Final confidence in [0.0, 1.0], blending LLM score
-                      with technical indicator confirmation
-    reasoning       : Full LLM rationale with article citations
-    news_citations  : List of cited article headlines extracted from response
-    generated_at    : ISO-8601 UTC timestamp of signal generation
-    ticker_rsi      : Latest RSI(14) value for the ticker
-    ticker_ma20     : Latest 20-day moving average closing price
-    vol_change_pct  : Volume change % vs 20-day average
-    model_version   : LLM model that generated the signal
-    raw_response    : Unprocessed LLM output (for audit)
+    Structured alpha signal produced by the end-to-end LangGraph agent pipeline.
     """
     ticker:           str
     signal_strength:  int            # 1 (Strong Sell) → 5 (Strong Buy)
@@ -99,8 +81,18 @@ class AlphaSignal:
     ticker_rsi:       float = float("nan")
     ticker_ma20:      float = float("nan")
     vol_change_pct:   float = float("nan")
-    model_version:    str = GEMINI_MODEL
+    model_version:    str = "langgraph-gemini"
     raw_response:     str = ""
+
+    # ── Long/Short Engine fields (v2) ──────────────────────────────────────────
+    position:              str   = "NO_TRADE"
+    position_size_pct:     float = 0.0
+    entry_price:           float = 0.0
+    stop_loss_price:       float = 0.0
+    take_profit_price:     float = 0.0
+    risk_reward_ratio:     float = 0.0
+    trade_rationale:       str   = ""
+
 
 
 # ─── Direction Parser ─────────────────────────────────────────────────────────
@@ -285,6 +277,46 @@ def combine_technical_score(
 
 # ─── Main Pipeline ─────────────────────────────────────────────────────────────
 
+def generate_alpha_for_ticker(ticker: str) -> dict:
+    """Run the full LangGraph alpha agent for one ticker."""
+    from .agent.graph import run_alpha_agent
+    final_state = run_alpha_agent(ticker)
+    
+    # Extract technical values for flat dict return
+    ind = final_state.get("technical_indicators", {})
+    
+    return {
+        "ticker":            ticker,
+        "alpha_signal":      final_state["alpha_signal"],
+        "confidence_score":  final_state["confidence_score"],
+        "position":          final_state["position_recommendation"],
+        "position_size_pct": final_state["position_size_pct"],
+        "entry_price":       final_state["entry_price"],
+        "stop_loss":         final_state["stop_loss_price"],
+        "take_profit":       final_state["take_profit_price"],
+        "risk_reward":       final_state["risk_reward_ratio"],
+        "news_summary":      final_state["news_summary"],
+        "technical_verdict": ind.get("technical_verdict", "NEUTRAL"),
+        "rsi":               ind.get("RSI"),
+        "trade_rationale":   final_state["trade_rationale"],
+    }
+
+
+def generate_all_alphas(tickers=None) -> list[dict]:
+    """Run agent for all tickers, return list of trade recommendations."""
+    if tickers is None:
+        tickers = ["AAPL", "GOOGL", "TSLA", "MSFT", "NVDA"]
+    results = []
+    for ticker in tickers:
+        try:
+            result = generate_alpha_for_ticker(ticker)
+            results.append(result)
+        except Exception as e:
+            logger.error(f"Error processing {ticker}: {e}")
+            print(f"Error processing {ticker}: {e}")
+    return results
+
+
 def run_alpha_pipeline(
     ticker: str,
     gemini_api_key: str,
@@ -296,152 +328,75 @@ def run_alpha_pipeline(
 ) -> AlphaSignal:
     """
     Execute the full alpha signal generation pipeline for a single ticker.
-
-    Steps
-    -----
-    1.  Fetch last 7 days of news (NewsAPI or sample fallback)
-    2.  Fetch 6 months of OHLCV data (yfinance)
-    3.  Compute RSI(14), MA20, vol_chg_pct
-    4.  Persist articles → ``news`` table
-    5.  Persist prices   → ``prices`` table
-    6.  Embed articles into ChromaDB (chunk + TextBlob sentiment)
-    7.  Build Gemini 1.5 Pro LCEL RAG chain
-    8.  Query for structured alpha signal
-    9.  Parse response → direction, strength, citations
-    10. Adjust confidence with technical confirmation
-    11. Persist AlphaSignal → ``signals`` table
-    12. Return AlphaSignal object
-
-    Parameters
-    ----------
-    ticker             : Stock ticker (e.g. "AAPL")
-    gemini_api_key     : Google Gemini API key (empty = offline demo)
-    news_api_key       : NewsAPI key (empty = sample fallback)
-    db_path            : Path to SQLite database file
-    chroma_persist_dir : ChromaDB persistence directory
-    force_refresh      : Re-embed even if collection already exists
-    model              : Gemini model name (default: gemini-1.5-pro)
-
-    Returns
-    -------
-    AlphaSignal dataclass instance
+    Now utilizes the LangGraph StateGraph agent for analysis & position sizing.
     """
     ticker = ticker.upper()
-    use_live_gemini = bool(gemini_api_key and not gemini_api_key.startswith("your_"))
     generated_at = datetime.now(timezone.utc).isoformat()
 
-    logger.info("═══ Starting alpha pipeline: %s (live_gemini=%s) ═══", ticker, use_live_gemini)
+    logger.info("═══ Starting LangGraph alpha pipeline: %s ═══", ticker)
 
-    # ── 1. Fetch news ──────────────────────────────────────────────────────────
+    # ── 1. Ingestion (Ensures data exists for the agent) ──────────────────────
+    # Fetch news
     articles = fetch_news(ticker, news_api_key, days_back=7)
-    logger.info("News: %d articles for %s", len(articles), ticker)
-
-    # ── 2. Fetch + compute prices ──────────────────────────────────────────────
+    # Fetch prices
     stock_df = fetch_stock_data(ticker, period="6mo")
     if not stock_df.empty:
         stock_df = compute_technical_indicators(stock_df)
 
-    # Extract latest indicator values (for AlphaSignal fields + confidence calc)
-    def _last(col: str) -> Optional[float]:
-        if stock_df.empty or col not in stock_df.columns:
-            return None
-        val = stock_df[col].dropna()
-        return float(val.iloc[-1]) if not val.empty else None
-
-    rsi      = _last("RSI")
-    ma20     = _last("MA20")
-    vol_chg  = _last("vol_chg_pct")
-    tech_summary = summarise_technicals(stock_df, ticker)
-
-    # ── 3. Persist to SQLite ───────────────────────────────────────────────────
+    # ── 2. Persist to SQLite (Agent nodes read from here) ─────────────────────
     init_db(db_path)
     save_news_to_db(articles, db_path)
     if not stock_df.empty:
         save_prices_to_db(stock_df, ticker, db_path)
 
-    # ── 4-5. Embed + RAG ───────────────────────────────────────────────────────
-    if use_live_gemini:
-        existing_count = get_collection_count(ticker, chroma_persist_dir, gemini_api_key)
+    # ── 3. Embed to ChromaDB (Agent node retrieves from here) ─────────────────
+    if gemini_api_key and not gemini_api_key.startswith("your_"):
+        embed_and_store(
+            articles=articles,
+            ticker=ticker,
+            persist_dir=chroma_persist_dir,
+            api_key=gemini_api_key,
+        )
 
-        if existing_count == 0 or force_refresh:
-            vectorstore, n_chunks = embed_and_store(
-                articles=articles,
-                ticker=ticker,
-                persist_dir=chroma_persist_dir,
-                api_key=gemini_api_key,
-            )
-            logger.info("Embedded %d chunks for %s", n_chunks, ticker)
-        else:
-            vectorstore = get_or_create_vectorstore(
-                collection_name=f"{ticker.lower()}_news",
-                persist_dir=chroma_persist_dir,
-                api_key=gemini_api_key,
-            )
-            logger.info("Reusing %d existing chunks for %s", existing_count, ticker)
-
-        # ── 6. Build chain + query ─────────────────────────────────────────────
-        chain_tuple = build_quant_chain(vectorstore, api_key=gemini_api_key, model=model)
-        rag_result  = query_alpha_signal(chain_tuple, ticker, tech_summary)
-
-    else:
-        logger.info("Offline mode — using mock signal for %s", ticker)
-        rag_result = generate_mock_signal(ticker, tech_summary)
-
-    # ── 7. Parse LLM response ──────────────────────────────────────────────────
-    raw_answer = rag_result.get("answer", "")
-    parsed     = parse_signal_response(raw_answer)
-
-    # ── 8. Confidence adjustment via technicals ────────────────────────────────
-    final_confidence = combine_technical_score(
-        rsi=rsi,
-        vol_chg_pct=vol_chg,
-        direction=parsed["direction"],
-        raw_confidence=parsed["raw_confidence"],
-    )
-
-    # Supplement citations from retrieved source Documents
-    source_docs = rag_result.get("sources", [])
-    doc_citations = list({
-        doc.metadata.get("title", "")
-        for doc in source_docs
-        if doc.metadata.get("title")
-    })
-    all_citations = list(dict.fromkeys(parsed["news_citations"] + doc_citations))[:10]
-
-    # ── 9. Persist signal to DB ────────────────────────────────────────────────
-    signal_id = save_signal(
-        db_path=db_path,
-        ticker=ticker,
-        signal_strength=parsed["signal_strength"],
-        direction=parsed["direction"],
-        confidence_score=final_confidence,
-        reasoning=parsed["reasoning"],
-        news_citations=all_citations,
-        rsi=rsi,
-        ma20=ma20,
-        vol_change_pct=vol_chg,
-        generated_at=generated_at,
-        model_version=model if use_live_gemini else "mock",
-    )
-
-    logger.info(
-        "Signal saved: id=%s | %s | %s | strength=%d | confidence=%.2f",
-        signal_id[:8], ticker, parsed["direction"],
-        parsed["signal_strength"], final_confidence,
-    )
-
-    # ── 10. Return AlphaSignal ─────────────────────────────────────────────────
+    # ── 4. Call LangGraph Agent ───────────────────────────────────────────────
+    from .agent.graph import run_alpha_agent
+    final_state = run_alpha_agent(ticker)
+    
+    ind = final_state.get("technical_indicators", {})
+    
+    # ── 5. Map Agent State to AlphaSignal ─────────────────────────────────────
     return AlphaSignal(
         ticker=ticker,
-        signal_strength=parsed["signal_strength"],
-        direction=parsed["direction"],
-        confidence_score=final_confidence,
-        reasoning=parsed["reasoning"],
-        news_citations=all_citations,
+        signal_strength=_signal_to_strength(final_state["alpha_signal"]),
+        direction=final_state["alpha_signal"],
+        confidence_score=final_state["confidence_score"],
+        reasoning=final_state["news_summary"],
+        news_citations=[c.get("source", "") for c in final_state.get("retrieved_news", [])[:5]],
         generated_at=generated_at,
-        ticker_rsi=rsi if rsi is not None else float("nan"),
-        ticker_ma20=ma20 if ma20 is not None else float("nan"),
-        vol_change_pct=vol_chg if vol_chg is not None else float("nan"),
-        model_version=model if use_live_gemini else "mock",
-        raw_response=raw_answer,
+        ticker_rsi=ind.get("RSI", float("nan")),
+        ticker_ma20=ind.get("MA_20", float("nan")),
+        vol_change_pct=ind.get("volume_change_pct", float("nan")),
+        model_version="langgraph-gemini-v2",
+        raw_response=final_state["trade_rationale"],
+        
+        # Extended fields
+        position=final_state["position_recommendation"],
+        position_size_pct=final_state["position_size_pct"],
+        entry_price=final_state["entry_price"],
+        stop_loss_price=final_state["stop_loss_price"],
+        take_profit_price=final_state["take_profit_price"],
+        risk_reward_ratio=final_state["risk_reward_ratio"],
+        trade_rationale=final_state["trade_rationale"],
     )
+
+
+def _signal_to_strength(signal: str) -> int:
+    mapping = {
+        "STRONG_BUY":  5,
+        "BUY":         4,
+        "NEUTRAL":     3,
+        "SELL":        2,
+        "STRONG_SELL": 1,
+    }
+    return mapping.get(signal.upper().replace(" ", "_"), 3)
+

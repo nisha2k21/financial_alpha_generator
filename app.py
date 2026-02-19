@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -27,12 +28,23 @@ sys.path.insert(0, str(ROOT_DIR))
 load_dotenv(ROOT_DIR / ".env")
 
 from src.alpha_engine import run_alpha_pipeline, AlphaSignal
-from src.database import init_db, get_signals, get_articles, get_prices
+from src.database import (
+    init_db, get_signals, get_articles, get_prices,
+    get_paper_portfolio, get_paper_trades, get_alerts,
+    get_sentiment_history, get_journals, get_weekly_reviews
+)
 from src.ingestion import (
     fetch_news, fetch_stock_data,
     compute_technical_indicators, summarise_technicals,
     load_sample_news,
 )
+from src.paper_trader import PaperPortfolio
+from src.backtester import run_backtest
+from src.alert_engine import create_price_alert, check_all_alerts
+from src.sentiment_tracker import SentimentTracker
+from src.ai_coach import AICoach
+from src.embeddings import get_or_create_vectorstore
+from src.rag_pipeline import build_rag_chain, query_rag
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -297,6 +309,9 @@ def _init_state():
         "stock_dfs":  {},      # ticker → DataFrame (with indicators)
         "articles":   {},      # ticker → list[dict]
         "rag_history": [],     # list[{question, answer, ticker, citations}]
+        "paper_portfolio": PaperPortfolio(DB_PATH),
+        "sentiment_tracker": SentimentTracker(DB_PATH),
+        "ai_coach": AICoach(DB_PATH),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -421,12 +436,16 @@ st.markdown(
 )
 st.divider()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📊 Alpha Dashboard",
     "🧠 AI Research Assistant",
+    "💰 Paper Trading",
+    "⏪ Backtest",
+    "🔔 Price Alerts",
+    "🌡️ Sentiment Heatmap",
+    "📔 Trading Journal & Coach",
     "🗄️ Signal History",
     "❓ How It Works",
-    "📉 Backtest",
 ])
 
 
@@ -445,7 +464,39 @@ with tab1:
             unsafe_allow_html=True,
         )
     else:
-        # ── Summary metric row ────────────────────────────────────────────────
+        # ── Portfolio summary bar ─────────────────────────────────────────────
+        st.markdown('<div class="section-header">Portfolio Position Summary</div>', unsafe_allow_html=True)
+        long_count = sum(1 for s in st.session_state.signals.values() if s.position == "LONG")
+        short_count = sum(1 for s in st.session_state.signals.values() if s.position == "SHORT")
+        total_size = sum(s.position_size_pct for s in st.session_state.signals.values())
+        
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.info(f"**Long Positions:** {long_count}")
+        with c2:
+            st.warning(f"**Short Positions:** {short_count}")
+        with c3:
+            st.success(f"**Allocated:** {total_size:.1f}%")
+
+        # ── Trade Recommendations Table ───────────────────────────────────────
+        st.markdown('<div class="section-header">Long/Short Trade Recommendations</div>', unsafe_allow_html=True)
+        trade_data = []
+        for ticker, sig in st.session_state.signals.items():
+            if sig.position != "NO_TRADE":
+                trade_data.append({
+                    "Ticker": ticker,
+                    "Pos": sig.position,
+                    "Size": f"{sig.position_size_pct}%",
+                    "Entry": f"${sig.entry_price:.2f}",
+                    "Stop Loss": f"${sig.stop_loss_price:.2f}",
+                    "Take Profit": f"${sig.take_profit_price:.2f}",
+                    "R:R": f"1:{sig.risk_reward_ratio:.1f}"
+                })
+        if trade_data:
+            st.table(pd.DataFrame(trade_data))
+        else:
+            st.info("No actionable trades generated (confidence < 55%)")
+
         st.markdown('<div class="section-header">Current Alpha Signals</div>', unsafe_allow_html=True)
 
         cols = st.columns(len(st.session_state.signals))
@@ -505,22 +556,40 @@ with tab1:
                     else:
                         st.info("Price data not loaded.")
 
-                with c3:
-                    st.markdown("**📌 Signal Metadata**")
-                    rsi_val = f"{sig.ticker_rsi:.1f}" if sig.ticker_rsi == sig.ticker_rsi else "N/A"
-                    ma_val  = f"${sig.ticker_ma20:.2f}" if sig.ticker_ma20 == sig.ticker_ma20 else "N/A"
-                    vc_val  = f"{sig.vol_change_pct:+.1f}%" if sig.vol_change_pct == sig.vol_change_pct else "N/A"
-                    st.markdown(
-                        f"<div style='font-size:0.82rem; line-height:2;'>"
-                        f"🔢 <b>Strength:</b> {sig.signal_strength}/5<br>"
-                        f"📈 <b>RSI(14):</b> {rsi_val}<br>"
-                        f"〰️ <b>MA20:</b> {ma_val}<br>"
-                        f"📦 <b>Volume Δ:</b> {vc_val}<br>"
-                        f"🤖 <b>Model:</b> {sig.model_version}<br>"
-                        f"🕐 <b>Generated:</b> {sig.generated_at[:10]}"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown("**📌 Position Parameters**")
+                    if sig.position != "NO_TRADE":
+                        st.markdown(
+                            f"<div style='background:rgba(255,255,255,0.05); padding:10px; border-radius:8px;'>"
+                            f"<b>Entry:</b> ${sig.entry_price:.2f}<br>"
+                            f"<b>Stop:</b> <span style='color:#ef4444;'>${sig.stop_loss_price:.2f}</span><br>"
+                            f"<b>Target:</b> <span style='color:#10b981;'>${sig.take_profit_price:.2f}</span><br>"
+                            f"<b>R:R:</b> 1:{sig.risk_reward_ratio:.1f}<br>"
+                            f"<b>Size:</b> {sig.position_size_pct}%"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                        if st.button(f"⚡ Execute {sig.position} on {ticker}", key=f"exec_{ticker}"):
+                            try:
+                                result = st.session_state.paper_portfolio.execute_trade(
+                                    ticker=ticker,
+                                    direction=sig.position,
+                                    price=sig.entry_price,
+                                    size_pct=sig.position_size_pct,
+                                    stop_loss=sig.stop_loss_price,
+                                    take_profit=sig.take_profit_price,
+                                    ai_signal=sig.direction,
+                                    ai_confidence=sig.confidence_score
+                                )
+                                st.success(result)
+                                st.balloons()
+                            except Exception as e:
+                                st.error(str(e))
+                    else:
+                        st.write("No active trade recommendation.")
+
+                # Full Rationale Expanders
+                with st.expander("📝 Full Trade Rationale & Strategy"):
+                    st.write(sig.trade_rationale if sig.trade_rationale else "N/A")
 
         # ── Price Chart ────────────────────────────────────────────────────────
         if st.session_state.stock_dfs:
@@ -664,8 +733,6 @@ with tab2:
             with st.spinner("Querying Gemini via RAG…"):
                 try:
                     if GEMINI_OK:
-                        from src.embeddings import get_or_create_vectorstore
-                        from src.rag_pipeline import build_rag_chain, query_rag
                         vs = get_or_create_vectorstore(
                             collection_name=f"{qa_ticker.lower()}_news",
                             persist_dir=CHROMA_DIR,
@@ -725,20 +792,269 @@ with tab2:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 3 — SIGNAL HISTORY
+# PAGE 3 — PAPER TRADING
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab3:
+    st.markdown('<div class="section-header">💰 Virtual Paper Trading</div>', unsafe_allow_html=True)
+    
+    # Refresh positions
+    if st.button("🔄 Sync & Refresh Positions"):
+        with st.spinner("Updating live prices..."):
+            st.session_state.paper_portfolio.update_positions()
+
+    # Portfolio Summary
+    summary = st.session_state.paper_portfolio.get_portfolio_summary()
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Equity", f"${summary['total_value']:,.2f}", f"{summary['return_pct']:+.2f}%")
+    m2.metric("Cash Balance", f"${summary['cash']:,.2f}")
+    m3.metric("Win Rate", f"{summary['win_rate']:.1f}%")
+    m4.metric("Open Positions", summary["open_count"])
+
+    # Open Positions Table
+    st.markdown("#### 📌 Open Positions")
+    positions = st.session_state.paper_portfolio.positions
+    if not positions:
+        st.info("No open positions. Use the Alpha Dashboard to execute signals.")
+    else:
+        pos_data = []
+        for ticker, pos in positions.items():
+            pos_data.append({
+                "Ticker": ticker,
+                "Type": pos.direction,
+                "Qty": pos.quantity,
+                "Entry": f"${pos.entry_price:.2f}",
+                "Curr": f"${pos.current_price:.2f}",
+                "P&L": f"${pos.unrealized_pnl:+.2f}",
+                "P&L %": f"{pos.unrealized_pnl_pct:+.2f}%",
+                "SL": f"${pos.stop_loss:.2f}",
+                "TP": f"${pos.take_profit:.2f}"
+            })
+        st.table(pd.DataFrame(pos_data))
+        
+        # Close position selector
+        sel_pos = st.selectbox("Close position", ["Select..."] + list(positions.keys()))
+        if sel_pos != "Select...":
+            if st.button(f"Close {sel_pos}"):
+                res = st.session_state.paper_portfolio.close_position(sel_pos)
+                st.success(res)
+                st.rerun()
+
+    # Trade History
+    with st.expander("📜 Closed Trade History"):
+        trades = get_paper_trades(DB_PATH)
+        if trades:
+            st.dataframe(pd.DataFrame(trades), use_container_width=True)
+        else:
+            st.write("No trades in history.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 4 — BACKTEST
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab4:
+    st.markdown('<div class="section-header">⏪ Technical Strategy Backtester</div>', unsafe_allow_html=True)
+    st.markdown("<p style='color:#64748b;'>Simulate institutional technical strategies over historical data.</p>", unsafe_allow_html=True)
+    
+    b1, b2, b3 = st.columns([2, 2, 2])
+    with b1:
+        bt_ticker = st.selectbox("Ticker", ALL_TICKERS, index=1)
+        bt_start = st.date_input("Start Date", date.today() - timedelta(days=365*2))
+    with b2:
+        bt_size = st.slider("Position Size %", 5, 50, 10, 5)
+        bt_capital = st.number_input("Initial Capital", 10000, 1000000, 100000)
+    with b3:
+        bt_sl = st.slider("Stop Loss (ATR Mult)", 1.0, 3.0, 1.5, 0.5)
+        bt_tp = st.slider("Take Profit (ATR Mult)", 2.0, 5.0, 2.5, 0.5)
+
+    if st.button("🚀 Run Walk-Forward Simulation", type="primary"):
+        with st.spinner("Simulating..."):
+            try:
+                res = run_backtest(
+                    ticker=bt_ticker,
+                    start_date=bt_start.strftime("%Y-%m-%d"),
+                    end_date=date.today().strftime("%Y-%m-%d"),
+                    initial_capital=bt_capital,
+                    position_size_pct=bt_size,
+                    stop_loss_mult=bt_sl,
+                    take_profit_mult=bt_tp
+                )
+                
+                # Metrics
+                r1, r2, r3, r4 = st.columns(4)
+                r1.metric("Final Capital", f"${res.final_capital:,.0f}", f"{res.total_return_pct:+.1f}%")
+                r2.metric("CAGR", f"{res.cagr:.1f}%")
+                r3.metric("Sharpe Ratio", f"{res.sharpe_ratio:.2f}")
+                r4.metric("Max Drawdown", f"{res.max_drawdown:.1f}%")
+                
+                # Equity Chart
+                df_eq = pd.DataFrame(res.equity_curve)
+                fig = px.line(df_eq, x="date", y=["equity", "benchmark"], 
+                               title=f"{bt_ticker} Strategy vs Benchmark",
+                               color_discrete_map={"equity": "#3b82f6", "benchmark": "#94a3b8"})
+                fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.dataframe(pd.DataFrame(res.trade_log), use_container_width=True)
+            except Exception as e:
+                st.error(f"Backtest error: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 5 — PRICE ALERTS
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab5:
+    st.markdown('<div class="section-header">🔔 Real-Time Price Alerts</div>', unsafe_allow_html=True)
+    
+    a1, a2, a3, a4 = st.columns([2, 2, 2, 3])
+    with a1:
+        at_ticker = st.selectbox("Ticker", ALL_TICKERS, key="at_ticker")
+    with a2:
+        at_type = st.selectbox("Type", ["PRICE_ABOVE", "PRICE_BELOW"])
+    with a3:
+        at_val = st.number_input("Trigger Price", value=150.0)
+    with a4:
+        at_msg = st.text_input("Custom Message", "Target reached!")
+    
+    if st.button("➕ Set Alert"):
+        create_price_alert(DB_PATH, at_ticker, at_type, at_val, at_msg)
+        st.success(f"Alert set for {at_ticker} {at_type} {at_val}")
+
+    st.divider()
+    
+    # Check Alerts Button
+    if st.button("⚡ Check Active Alerts Now"):
+        triggered = check_all_alerts(DB_PATH)
+        if triggered:
+            for t in triggered:
+                st.toast(t["message"], icon="🔔")
+                st.warning(t["message"])
+        else:
+            st.info("No alerts triggered in this check.")
+
+    # Active Alerts Table
+    st.markdown("#### ⏳ Active Alerts")
+    active_alerts = get_alerts(DB_PATH, active_only=True)
+    if active_alerts:
+        df_a = pd.DataFrame(active_alerts)[["ticker", "alert_type", "trigger_value", "created_at"]]
+        st.dataframe(df_a, use_container_width=True)
+    else:
+        st.write("No active alerts.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 6 — SENTIMENT HEATMAP
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab6:
+    st.markdown('<div class="section-header">🌡️ Global Sentiment Heatmap</div>', unsafe_allow_html=True)
+    st.markdown("<p style='color:#64748b;'>Aggregated social sentiment from Reddit, News, and AI context.</p>", unsafe_allow_html=True)
+    
+    # Calculate sentiment for all tickers
+    if st.button("📊 Update Sentiment Heatmap"):
+        with st.spinner("Scanning social & news..."):
+            for t in ALL_TICKERS:
+                st.session_state.sentiment_tracker.get_ticker_sentiment(t)
+    
+    # Fetch latest scores
+    scores = get_sentiment_history(DB_PATH)
+    if scores:
+        df_s = pd.DataFrame(scores)
+        # Get latest per ticker
+        latest_s = df_s.sort_values("timestamp").groupby("ticker").last().reset_index()
+        
+        fig = px.treemap(latest_s, path=["ticker"], values=[1]*len(latest_s),
+                         color="sentiment_score",
+                         color_continuous_scale="RdYlGn",
+                         range_color=[-100, 100],
+                         title="Current Market Sentiment (Reddit + News)")
+        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.dataframe(latest_s[["ticker", "sentiment_score", "source_counts", "timestamp"]], use_container_width=True)
+    else:
+        st.info("No sentiment data yet. Click 'Update' to begin scanning.")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 7 — AI TRADING JOURNAL & COACH
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab7:
+    st.markdown('<div class="section-header">📔 AI Trading Journal & Coach</div>', unsafe_allow_html=True)
+    
+    coach_tab1, coach_tab2, coach_tab3 = st.tabs(["Self-Reflection", "Weekly Review", "Trading DNA"])
+    
+    with coach_tab1:
+        st.markdown("#### 🤔 Why did you take that trade?")
+        recent_trades = get_paper_trades(DB_PATH)
+        if not recent_trades:
+            st.info("No trades to reflect on.")
+        else:
+            t_ids = [f"{t['ticker']} ({t['entry_date'][:10]}) - {t['trade_id'][:8]}" for t in recent_trades]
+            sel_t_idx = st.selectbox("Select Trade", range(len(t_ids)), format_func=lambda i: t_ids[i])
+            sel_t = recent_trades[sel_t_idx]
+            
+            # Check if journal exists
+            journals = get_journals(DB_PATH, trade_id=sel_t["trade_id"])
+            if journals:
+                st.markdown(f'<div class="rag-box">{journals[0]["content"]}</div>', unsafe_allow_html=True)
+            else:
+                if st.button("🤖 Generate Gemini Critique"):
+                    with st.spinner("AI is analyzing your strategy..."):
+                        res = st.session_state.ai_coach.generate_journal_critique(sel_t)
+                        st.markdown(f'<div class="rag-box">{res}</div>', unsafe_allow_html=True)
+    
+    with coach_tab2:
+        st.markdown("#### 📅 Weekly Performance Review")
+        if st.button("📈 Run Weekly Analysis"):
+            with st.spinner("Gemini is reviewing your week..."):
+                res = st.session_state.ai_coach.generate_weekly_review()
+                st.markdown(f'<div class="rag-box">{res}</div>', unsafe_allow_html=True)
+        
+        st.divider()
+        prev_reviews = get_weekly_reviews(DB_PATH)
+        if prev_reviews:
+            for rev in reversed(prev_reviews):
+                with st.expander(f"Review: {rev['week_start']} to {rev['week_end']}"):
+                    st.write(rev["content"])
+
+    with coach_tab3:
+        st.markdown("#### 🧬 Trading DNA")
+        dna = st.session_state.ai_coach.get_trader_dna()
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Risk Profile", dna["risk_profile"])
+        c2.metric("Edge Quality", f"{dna['edge_score']:.1f}/10")
+        c3.metric("Discipline Score", f"{dna['discipline_score']:.1f}/10")
+        
+        # DNA Chart
+        df_dna = pd.DataFrame({
+            "Metric": ["Risk", "Edge", "Discipline", "Timing", "Sizing"],
+            "Value": [dna["risk_score"], dna["edge_score"], dna["discipline_score"], 7.5, 6.0]
+        })
+        fig = px.line_polar(df_dna, r="Value", theta="Metric", line_close=True)
+        fig.update_traces(fill="toself", fillcolor="rgba(59,130,246,0.3)")
+        fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 8 — SIGNAL HISTORY
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab8:
     st.markdown('<div class="section-header">🗄️ Signal History — SQLite Store</div>', unsafe_allow_html=True)
 
     # Fetch all signals from DB
-    all_db_signals = get_signals(DB_PATH, limit=500)
+    all_signals = get_signals(DB_PATH, limit=500)
 
-    if not all_db_signals:
+    if not all_signals:
         st.info("No signals in the database yet. Run ⚡ Fetch & Analyze to generate some.", icon="ℹ️")
     else:
-        df_hist = pd.DataFrame(all_db_signals)
-
+        df_hist = pd.DataFrame(all_signals)
+        
         # Friendly column rename
         rename_map = {
             "ticker":           "Ticker",
@@ -760,14 +1076,16 @@ with tab3:
             ticker_filter = st.multiselect(
                 "Filter by Ticker",
                 options=sorted(df_display["Ticker"].unique().tolist()) if "Ticker" in df_display else [],
+                key="hist_ticker_filt"
             )
         with f2:
             dir_options = sorted(df_display["Direction"].unique().tolist()) if "Direction" in df_display else []
-            dir_filter = st.multiselect("Filter by Direction", options=dir_options)
+            dir_filter = st.multiselect("Filter by Direction", options=dir_options, key="hist_dir_filt")
         with f3:
             date_filter = st.date_input(
                 "From date",
                 value=date.today() - timedelta(days=30),
+                key="hist_date_filt"
             )
 
         # Apply filters
@@ -782,86 +1100,34 @@ with tab3:
             filtered = filtered[filtered["Generated At"] >= cutoff]
             filtered["Generated At"] = filtered["Generated At"].dt.strftime("%Y-%m-%d %H:%M UTC")
 
-        # Format confidence as %
-        if "Confidence" in filtered.columns:
-            filtered["Confidence"] = (filtered["Confidence"] * 100).round(1).astype(str) + "%"
-
-        # Display columns
-        display_cols = [c for c in ["Ticker", "Direction", "Strength (1-5)", "Confidence",
+        # Display
+        display_cols = [c for c in ["Ticker", "Direction", "Confidence", "Position", "position_size_pct", "risk_reward_ratio",
                                      "RSI", "MA20", "Vol Δ%", "Model", "Generated At"]
                         if c in filtered.columns]
-
-        def _style_dir(val):
-            m = {
-                "Strong Buy": "#10b981", "Buy": "#34d399",
-                "Neutral": "#94a3b8",
-                "Sell": "#f87171", "Strong Sell": "#ef4444",
-            }
-            return f"color: {m.get(val, 'white')}; font-weight: 700;"
-
-        styled = (
-            filtered[display_cols]
-            .style
-            .applymap(_style_dir, subset=["Direction"] if "Direction" in display_cols else [])
-            .format({
-                "RSI":    lambda x: f"{x:.1f}" if pd.notna(x) else "N/A",
-                "MA20":   lambda x: f"${x:.2f}" if pd.notna(x) else "N/A",
-                "Vol Δ%": lambda x: f"{x:+.1f}%" if pd.notna(x) else "N/A",
-            }, na_rep="N/A")
-            .set_properties(**{"font-size": "0.82rem"})
-        )
-
-        st.markdown(f"<div style='font-size:0.8rem; color:#64748b; margin-bottom:6px;'>"
-                    f"Showing {len(filtered)} signal(s)</div>", unsafe_allow_html=True)
-        st.dataframe(styled, use_container_width=True, height=420)
-
-        # ── Download ──────────────────────────────────────────────────────────
-        csv = filtered[display_cols].to_csv(index=False)
-        st.download_button(
-            label="⬇️ Export to CSV",
-            data=csv,
-            file_name=f"alpha_signals_{date.today()}.csv",
-            mime="text/csv",
+        
+        st.dataframe(
+            filtered[display_cols].sort_values("Generated At", ascending=False),
             use_container_width=True,
+            height=420
         )
 
-        # ── Raw news articles from DB ─────────────────────────────────────────
-        with st.expander("📰 View Raw News Articles (from DB)", expanded=False):
-            t_opts = ["All"] + sorted(df_display["Ticker"].unique().tolist()) if "Ticker" in df_display else ["All"]
-            t_pick = st.selectbox("Filter articles by ticker", t_opts, key="art_pick")
-            articles_db = get_articles(DB_PATH, ticker=None if t_pick == "All" else t_pick, limit=50)
-            if articles_db:
-                df_art = pd.DataFrame(articles_db)[["ticker","title","source","published_at","sentiment_score"]]
-                df_art.columns = ["Ticker","Headline","Source","Published","Sentiment"]
-                st.dataframe(df_art, use_container_width=True, height=300)
-            else:
-                st.write("No articles in DB yet.")
-
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PAGE 4 — HOW IT WORKS
+# PAGE 9 — HOW IT WORKS
 # ══════════════════════════════════════════════════════════════════════════════
 
-with tab4:
-    st.markdown('<div class="section-header">❓ How It Works</div>', unsafe_allow_html=True)
-    st.markdown(
-        "<p style='color:#64748b; font-size:0.9rem; max-width:700px;'>"
-        "This system combines <b style='color:#f1f5f9;'>Retrieval-Augmented Generation (RAG)</b> "
-        "with quantitative technical analysis to produce institutional-grade alpha signals. "
-        "Here's the full data pipeline:"
-        "</p>",
-        unsafe_allow_html=True,
-    )
-
+with tab9:
+    st.markdown('<div class="section-header">❓ How the Alpha Pipeline Works</div>', unsafe_allow_html=True)
+    
     # ── Pipeline diagram ──────────────────────────────────────────────────────
     steps = [
-        ("📰", "News Fetch",       "NewsAPI\n+ yfinance"),
-        ("✂️", "Chunking",          "500 tokens\n50-token overlap"),
-        ("🟣", "Sentiment",         "TextBlob\npolarity per chunk"),
-        ("🗄️", "ChromaDB",          "Google Embeddings\nVector Store"),
-        ("🤖", "Gemini 1.5 Pro",    "LCEL RAG Chain\nk=5 retrieval"),
-        ("📊", "Alpha Signal",      "1–5 Strength\n+ Confidence Score"),
-        ("💾", "SQLite / BigQuery", "Persist &\nAudit Trail"),
+        ("📰", "News Fetch", "NewsAPI/yf"),
+        ("🟣", "Sentiment", "Hybrid Score"),
+        ("🗄️", "ChromaDB", "RAG Storage"),
+        ("🤖", "Gemini 1.5", "Alpha Analyst"),
+        ("📊", "Technical", "Signal Check"),
+        ("💰", "Paper Trade", "Virtual Exec"),
+        ("📔", "AI Coach", "DNA Critique"),
     ]
 
     pipe_cols = st.columns(len(steps))
@@ -869,365 +1135,29 @@ with tab4:
         with col:
             st.markdown(
                 f"<div class='pipeline-step'>"
-                f"<div class='step-icon'>{icon}</div>"
-                f"<div class='step-name'>{name}</div>"
-                f"<div class='step-label'>{detail}</div>"
+                f"<div style='font-size:1.5rem;'>{icon}</div>"
+                f"<div style='font-weight:700; color:#f1f5f9; font-size:0.8rem;'>{name}</div>"
+                f"<div style='color:#64748b; font-size:0.7rem;'>{detail}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-
-    # Arrows between steps
-    arrow_cols = st.columns(len(steps) * 2 - 1)
-    for i in range(len(steps) * 2 - 1):
-        with arrow_cols[i]:
-            if i % 2 == 1:
-                st.markdown(
-                    "<div style='text-align:center; color:#3b82f6; font-size:1.2rem; padding-top:28px;'>→</div>",
-                    unsafe_allow_html=True,
-                )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Columns: Technical Confidence + BigQuery ───────────────────────────────
-    left, right = st.columns(2)
-
-    with left:
-        st.markdown("#### 🔬 Technical Confidence Scoring")
-        st.markdown(
-            "<p style='color:#64748b; font-size:0.85rem;'>"
-            "The final confidence score blends the LLM's self-reported certainty with "
-            "independent confirmation from technical indicators:</p>",
-            unsafe_allow_html=True,
-        )
+    
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("#### 🔬 Hybrid Alpha Scoring")
         st.markdown("""
-| Condition | Direction | Adjustment |
-|-----------|-----------|------------|
-| RSI < 30 (oversold) | Buy / Strong Buy | **+15%** ✅ |
-| RSI > 70 (overbought) | Sell / Strong Sell | **+15%** ✅ |
-| RSI < 30 (oversold) | Sell (conflict) | **−10%** ⚠️ |
-| RSI > 70 (overbought) | Buy (conflict) | **−10%** ⚠️ |
-| Volume > +50% avg | Any | **+10%** 📈 |
-| Volume > +100% avg | Any | **+15%** 🔥 |
-""")
-
-    with right:
-        st.markdown("#### ☁️ Scaling to Production (BigQuery)")
-        st.markdown(
-            "<p style='color:#64748b; font-size:0.85rem;'>"
-            "The SQLite schema is designed to be <b style='color:#f1f5f9;'>BigQuery-compatible</b>. "
-            "To scale to production:</p>",
-            unsafe_allow_html=True,
-        )
-        st.code("""
-# 1. Create a GCP project & BigQuery dataset
-gcloud projects create my-alpha-project
-bq mk --dataset my-alpha-project:alpha_signals
-
-# 2. Set credentials
-export GOOGLE_APPLICATION_CREDENTIALS=key.json
-
-# 3. Push SQLite → BigQuery
-bq load \\
-  --source_format=CSV \\
-  --autodetect \\
-  alpha_signals.signals \\
-  alpha_signals_export.csv
-""", language="bash")
-
+        The system uses a **weighted confidence score** (0-100%):
+        - **40% News Sentiment**: Extracted via RAG and Hybrid Social Tracker.
+        - **30% LLM Analysis**: Gemini's reasoning on catalysts and risks.
+        - **30% Technical Filter**: Overbought/Oversold verification via RSI/MAs.
+        """)
+    with c2:
+        st.markdown("#### 💼 Risk Management Engine")
         st.markdown("""
-**BigQuery benefits at scale:**
-- 🚀 Query billions of rows in seconds
-- 📡 Real-time streaming via Pub/Sub
-- 🔒 IAM roles for team access control
-- 📊 Looker Studio dashboards
-- 🔗 Connect to Vertex AI for model serving
-""")
-
-    st.divider()
-
-    # ── Signal strength legend ─────────────────────────────────────────────────
-    st.markdown("#### 📡 Signal Strength Scale")
-    strength_cols = st.columns(5)
-    strength_data = [
-        (1, "Strong Sell", "#ef4444"),
-        (2, "Sell",        "#f87171"),
-        (3, "Neutral",     "#94a3b8"),
-        (4, "Buy",         "#34d399"),
-        (5, "Strong Buy",  "#10b981"),
-    ]
-    for col, (s, label, color) in zip(strength_cols, strength_data):
-        with col:
-            st.markdown(
-                f"<div style='text-align:center; background:#0f1929; border:1px solid #1e293b; "
-                f"border-radius:10px; padding:0.8rem; border-top: 3px solid {color};'>"
-                f"<div style='font-size:1.6rem; font-weight:800; color:{color};'>{s}</div>"
-                f"<div style='font-size:0.75rem; color:{color}; font-weight:600;'>{label}</div>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-    st.divider()
-
-    # ── Tech stack ────────────────────────────────────────────────────────────
-    st.markdown("#### 🛠️ Tech Stack")
-    stack_cols = st.columns(4)
-    stack = [
-        ("🤖", "Gemini 1.5 Pro",  "google-generativeai"),
-        ("🦜", "LangChain LCEL",  "langchain, langchain-chroma"),
-        ("🟣", "ChromaDB",        "Local vector store"),
-        ("📊", "yfinance + ta",   "RSI, MA20, vol analysis"),
-        ("💬", "TextBlob",        "Sentiment per chunk"),
-        ("📰", "NewsAPI",         "Financial news ingestion"),
-        ("💾", "SQLite / BQ",     "Production-ready schema"),
-        ("🖥️", "Streamlit",       "Real-time dashboard"),
-    ]
-    for i, (icon, name, detail) in enumerate(stack):
-        with stack_cols[i % 4]:
-            st.markdown(
-                f"<div style='background:#0f1929; border:1px solid #1e293b; border-radius:8px; "
-                f"padding:0.7rem; margin-bottom:0.5rem;'>"
-                f"<span style='font-size:1.1rem;'>{icon}</span> "
-                f"<b style='color:#f1f5f9; font-size:0.85rem;'>{name}</b><br>"
-                f"<span style='color:#475569; font-size:0.72rem;'>{detail}</span>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# PAGE 5 — BACKTEST
-# ══════════════════════════════════════════════════════════════════════════════
-
-with tab5:
-    st.markdown(
-        "<h2 style='font-size:1.4rem; font-weight:700; margin-bottom:4px;'>"
-        "📉 Strategy Backtest — 1 Year</h2>"
-        "<p style='color:#64748b; font-size:0.83rem; margin-top:0;'>"
-        "RSI(14) + MA20/MA50 crossover signal · Long-only · 0.1% transaction cost · "
-        "vs equal-weight buy-and-hold benchmark</p>",
-        unsafe_allow_html=True,
-    )
-
-    # ── Controls ──────────────────────────────────────────────────────────────
-    bt_col1, bt_col2, bt_col3 = st.columns([2, 1, 1])
-    with bt_col1:
-        bt_tickers = st.multiselect(
-            "Tickers to backtest",
-            ALL_TICKERS,
-            default=["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL"],
-            key="bt_tickers",
-        )
-    with bt_col2:
-        bt_longonly = st.toggle("Long-only mode", value=True, key="bt_long")
-    with bt_col3:
-        bt_tc = st.selectbox(
-            "Transaction cost",
-            [0.0, 0.001, 0.002, 0.005],
-            index=1,
-            format_func=lambda x: f"{x*100:.1f}%",
-            key="bt_tc",
-        )
-
-    run_bt = st.button("▶ Run Backtest", type="primary", key="run_bt", use_container_width=True)
-
-    if run_bt or "bt_result" in st.session_state:
-        if run_bt:
-            if not bt_tickers:
-                st.warning("Select at least one ticker.")
-                st.stop()
-
-            with st.spinner("Fetching 1 year of price data and running simulation…"):
-                try:
-                    from src.backtest import run_backtest
-                    bt_result, bt_sim = run_backtest(
-                        tickers=bt_tickers,
-                        period="1y",
-                        long_only=bt_longonly,
-                        transaction_cost=bt_tc,
-                    )
-                    st.session_state["bt_result"] = bt_result
-                    st.session_state["bt_sim"] = bt_sim
-                except Exception as e:
-                    st.error(f"Backtest failed: {e}")
-                    st.stop()
-
-        bt_result = st.session_state["bt_result"]
-        bt_sim    = st.session_state["bt_sim"]
-
-        # ── Section: Performance Summary ──────────────────────────────────────
-        st.markdown("### 📊 Performance Summary")
-
-        def _color(val: float) -> str:
-            return "#10b981" if val >= 0 else "#ef4444"
-
-        def _metric_card(label: str, value: str, subtext: str = "", color: str = "#f1f5f9") -> str:
-            return (
-                f"<div style='background:#0f1929; border:1px solid #1e293b; border-radius:10px; "
-                f"padding:1rem 1.2rem; margin-bottom:0.5rem;'>"
-                f"<div style='font-size:0.72rem; color:#64748b; font-weight:600; text-transform:uppercase; "
-                f"letter-spacing:0.05em;'>{label}</div>"
-                f"<div style='font-size:1.6rem; font-weight:800; color:{color}; margin:2px 0;'>{value}</div>"
-                f"<div style='font-size:0.75rem; color:#475569;'>{subtext}</div>"
-                f"</div>"
-            )
-
-        row1 = st.columns(4)
-        row2 = st.columns(4)
-
-        tr   = bt_result.total_return
-        cagr = bt_result.cagr
-        sr   = bt_result.sharpe_ratio
-        md   = bt_result.max_drawdown
-        so   = bt_result.sortino_ratio
-        cal  = bt_result.calmar_ratio
-        wr   = bt_result.win_rate
-        alp  = bt_result.alpha_vs_benchmark
-
-        with row1[0]:
-            st.markdown(_metric_card(
-                "Total Return", f"{tr*100:+.2f}%",
-                f"Benchmark: {bt_result.bm_total_return*100:+.2f}%",
-                _color(tr)), unsafe_allow_html=True)
-        with row1[1]:
-            st.markdown(_metric_card(
-                "CAGR", f"{cagr*100:+.2f}%",
-                "Compound Annual Growth Rate",
-                _color(cagr)), unsafe_allow_html=True)
-        with row1[2]:
-            sr_color = "#10b981" if sr >= 1 else "#f59e0b" if sr >= 0 else "#ef4444"
-            st.markdown(_metric_card(
-                "Sharpe Ratio", f"{sr:.2f}",
-                "≥1 Good · ≥2 Excellent · <0 Bad",
-                sr_color), unsafe_allow_html=True)
-        with row1[3]:
-            st.markdown(_metric_card(
-                "Max Drawdown", f"{md*100:.2f}%",
-                f"Benchmark: {bt_result.bm_max_drawdown*100:.2f}%",
-                _color(md)), unsafe_allow_html=True)
-
-        with row2[0]:
-            st.markdown(_metric_card(
-                "Sortino Ratio", f"{so:.2f}",
-                "Downside-adjusted Sharpe",
-                "#10b981" if so >= 1 else "#f59e0b"), unsafe_allow_html=True)
-        with row2[1]:
-            st.markdown(_metric_card(
-                "Calmar Ratio", f"{cal:.2f}",
-                "CAGR / Max Drawdown",
-                "#10b981" if cal >= 0.5 else "#f59e0b"), unsafe_allow_html=True)
-        with row2[2]:
-            st.markdown(_metric_card(
-                "Win Rate", f"{wr*100:.1f}%",
-                f"Avg Win: {bt_result.avg_win*100:+.2f}% | Avg Loss: {bt_result.avg_loss*100:+.2f}%",
-                "#10b981" if wr >= 0.5 else "#f59e0b"), unsafe_allow_html=True)
-        with row2[3]:
-            st.markdown(_metric_card(
-                "Alpha vs Benchmark", f"{alp*100:+.2f}%",
-                f"Beta: {bt_result.beta:.2f}",
-                _color(alp)), unsafe_allow_html=True)
-
-        # ── Section: Extra stats row ───────────────────────────────────────────
-        st.markdown("---")
-        s1, s2, s3, s4, s5 = st.columns(5)
-        s1.metric("Ann. Volatility", f"{bt_result.volatility_ann*100:.2f}%",
-                  f"BM: {bt_result.bm_volatility_ann*100:.2f}%")
-        s2.metric("Best Day",  f"{bt_result.best_day*100:+.2f}%")
-        s3.metric("Worst Day", f"{bt_result.worst_day*100:+.2f}%")
-        s4.metric("BM Sharpe", f"{bt_result.bm_sharpe:.2f}")
-        s5.metric("Risk-Free Rate", "5.00% p.a.")
-
-        # ── Section: Equity Curve ─────────────────────────────────────────────
-        st.markdown("### 📈 Equity Curve vs Benchmark")
-        dates = pd.to_datetime(bt_sim["date"])
-        fig_eq = go.Figure()
-        fig_eq.add_trace(go.Scatter(
-            x=dates, y=bt_result.equity_curve, name="Strategy",
-            line=dict(color="#3b82f6", width=2.5),
-            fill="tozeroy", fillcolor="rgba(59,130,246,0.07)",
-        ))
-        fig_eq.add_trace(go.Scatter(
-            x=dates, y=bt_result.bm_equity_curve, name="Benchmark (E/W B&H)",
-            line=dict(color="#f59e0b", width=1.8, dash="dot"),
-        ))
-        fig_eq.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#f1f5f9"),
-            margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="Portfolio Value ($)", gridcolor="rgba(255,255,255,0.04)"),
-            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
-            legend=dict(bgcolor="rgba(0,0,0,0)"),
-            hovermode="x unified",
-            height=320,
-        )
-        st.plotly_chart(fig_eq, use_container_width=True)
-
-        # ── Section: Drawdown ─────────────────────────────────────────────────
-        st.markdown("### 📉 Drawdown")
-        fig_dd = go.Figure()
-        fig_dd.add_trace(go.Scatter(
-            x=dates, y=bt_result.drawdown_curve * 100,
-            name="Strategy", line=dict(color="#ef4444", width=2),
-            fill="tozeroy", fillcolor="rgba(239,68,68,0.12)",
-        ))
-        fig_dd.add_trace(go.Scatter(
-            x=dates, y=bt_result.bm_drawdown_curve * 100,
-            name="Benchmark", line=dict(color="#f59e0b", width=1.4, dash="dot"),
-        ))
-        fig_dd.update_layout(
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#f1f5f9"),
-            margin=dict(l=0, r=0, t=10, b=0),
-            yaxis=dict(title="Drawdown (%)", gridcolor="rgba(255,255,255,0.04)"),
-            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
-            legend=dict(bgcolor="rgba(0,0,0,0)"),
-            hovermode="x unified",
-            height=240,
-        )
-        st.plotly_chart(fig_dd, use_container_width=True)
-
-        # ── Section: Monthly Returns ──────────────────────────────────────────
-        if not bt_result.monthly_returns.empty:
-            st.markdown("### 🗓️ Monthly Returns")
-            df_m = bt_result.monthly_returns.copy()
-            df_m["return_pct"] = (df_m["return"] * 100).round(2)
-            df_m["month_year"] = df_m["date"].dt.strftime("%b %Y")
-            df_m["color"]      = df_m["return_pct"].apply(
-                lambda x: f"{'🟢' if x >= 0 else '🔴'} {x:+.2f}%"
-            )
-            display_m = df_m[["month_year", "return_pct", "color"]].copy()
-            display_m.columns = ["Month", "Return (%)", "Signal"]
-            display_m = display_m.reset_index(drop=True)
-
-            st.dataframe(
-                display_m.style.applymap(
-                    lambda v: "color:#10b981; font-weight:600;" if isinstance(v, float) and v >= 0
-                    else ("color:#ef4444; font-weight:600;" if isinstance(v, float) else ""),
-                    subset=["Return (%)"]
-                ),
-                use_container_width=True,
-                hide_index=True,
-                height=320,
-            )
-
-        # ── Disclaimer ────────────────────────────────────────────────────────
-        st.markdown(
-            "<div style='background:#0f1929; border:1px solid #f59e0b40; border-radius:8px; "
-            "padding:0.9rem 1.1rem; margin-top:1rem; font-size:0.78rem; color:#94a3b8;'>"
-            "⚠️ <b>Disclaimer:</b> This backtest uses a rule-based RSI+MA signal as a proxy for the "
-            "AI-generated alpha signals. Past performance does not guarantee future results. "
-            "No slippage or market-impact modelling applied. For research purposes only."
-            "</div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            "<div style='text-align:center; padding:4rem; color:#475569;'>"
-            "<div style='font-size:3rem;'>📉</div>"
-            "<div style='font-size:1.1rem; font-weight:600; margin-top:0.5rem;'>Run the 1-Year Backtest</div>"
-            "<div style='font-size:0.85rem; margin-top:0.5rem;'>Select tickers above and click "
-            "<b>▶ Run Backtest</b> to simulate strategy performance.</div>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
+        Every AI signal is paired with strict risk parameters:
+        - **Position Sizing**: Based on volatility and account ATR.
+        - **Smart Stops**: Dynamic Stop-Loss based on technical support.
+        - **Take Profit**: Calculated for an optimal Risk-Reward ratio (1:2+).
+        """)

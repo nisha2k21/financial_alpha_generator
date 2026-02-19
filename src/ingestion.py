@@ -25,6 +25,7 @@ import pandas as pd
 import yfinance as yf
 from langchain_core.documents import Document
 from tenacity import retry, stop_after_attempt, wait_exponential
+from ta.momentum import RSIIndicator
 
 from .database import save_articles_batch, save_prices_batch
 
@@ -254,8 +255,6 @@ def compute_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     result = df.copy()
 
     try:
-        from ta.momentum import RSIIndicator
-
         # RSI(14) — standard 14-period Wilder RSI
         rsi_indicator = RSIIndicator(close=result["Close"], window=14)
         result["RSI"] = rsi_indicator.rsi()
