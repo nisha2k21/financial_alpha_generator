@@ -809,7 +809,7 @@ with tab3:
     m1.metric("Total Equity", f"${summary['total_value']:,.2f}", f"{summary['return_pct']:+.2f}%")
     m2.metric("Cash Balance", f"${summary['cash']:,.2f}")
     m3.metric("Win Rate", f"{summary['win_rate']:.1f}%")
-    m4.metric("Open Positions", summary["open_count"])
+    m4.metric("Open Positions", summary["open_positions"])
 
     # Open Positions Table
     st.markdown("#### 📌 Open Positions")
