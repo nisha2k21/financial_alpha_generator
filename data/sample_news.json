@@ -1,0 +1,92 @@
+[
+  {
+    "id": "news_001",
+    "ticker": "AAPL",
+    "title": "Apple Intelligence Drives Record iPhone 16 Demand in Emerging Markets",
+    "source": "Reuters",
+    "author": "Sarah Mitchell",
+    "publishedAt": "2025-02-10T08:30:00Z",
+    "content": "Apple Inc. reported an unexpected surge in iPhone 16 demand across India and Southeast Asia, driven by the rollout of its Apple Intelligence suite. Analysts at Morgan Stanley raised their price target to $245, citing a 23% quarter-over-quarter increase in unit shipments. The company's services revenue hit an all-time high of $26.3 billion, contributing to an expanded gross margin of 47.1%. CEO Tim Cook noted that the generative AI features embedded in iOS 18.3 are accelerating upgrade cycles among professional users, with enterprise adoption growing 41% year-over-year. Supply chain checks from Taiwan indicate that TSMC is running at full capacity to meet demand."
+  },
+  {
+    "id": "news_002",
+    "ticker": "TSLA",
+    "title": "Tesla Cybertruck Production Ramp Hits Snag; Full Self-Driving Faces New Scrutiny",
+    "source": "Wall Street Journal",
+    "author": "James Patel",
+    "publishedAt": "2025-02-11T14:15:00Z",
+    "content": "Tesla's Cybertruck assembly line in Giga Texas has encountered significant quality control challenges, with sources reporting a 38% rejection rate for structural battery packs, well above the 5% industry threshold. Production volumes for Q1 2025 are expected to come in at 12,000 units versus the 20,000-unit street estimate. Meanwhile, the National Highway Traffic Safety Administration opened a preliminary investigation into 14 reported incidents involving Tesla's Full Self-Driving (FSD) software version 12.4, raising concerns about regulatory approval timelines for autonomous operation. Short interest in TSLA has risen to 3.2% of float, the highest level since Q3 2024."
+  },
+  {
+    "id": "news_003",
+    "ticker": "NVDA",
+    "title": "NVIDIA Blackwell GPUs Sold Out Through 2026; Data Center Revenue Forecast Raised 40%",
+    "source": "Bloomberg",
+    "author": "Chen Wei",
+    "publishedAt": "2025-02-12T09:00:00Z",
+    "content": "NVIDIA Corporation announced that its next-generation Blackwell B200 and GB200 NVLink systems are completely sold out through at least Q4 2026, with a backlog exceeding $80 billion. Major cloud providers — Amazon AWS, Microsoft Azure, and Google Cloud — each signed multi-billion dollar supply agreements, locking in allocations for large language model training infrastructure. Wells Fargo raised its data center revenue estimate for FY2026 to $195 billion, up from $140 billion, implying a 40% upward revision. NVIDIA's CEO Jensen Huang stated that every dollar of software running on the cloud will eventually be regenerated on NVIDIA-accelerated infrastructure, underscoring the company's long-term positioning."
+  },
+  {
+    "id": "news_004",
+    "ticker": "MSFT",
+    "title": "Microsoft Azure AI Copilot Revenues Surpass $10B Annual Run Rate",
+    "source": "CNBC",
+    "author": "Laura Kim",
+    "publishedAt": "2025-02-08T11:45:00Z",
+    "content": "Microsoft Corporation reported that its AI Copilot products embedded across Microsoft 365, GitHub, and Azure have crossed a $10 billion annualized revenue run rate, ahead of internal guidance that had projected this milestone for late 2025. Azure cloud revenue grew 31% year-over-year in the most recent quarter, accelerating from 28% the prior period. CFO Amy Hood guided for continued margin expansion as high-margin AI services comprise an increasing share of revenue. The company's partnership with OpenAI, reinforced by a $13 billion investment, is seen as a durable competitive moat that is difficult for rivals to replicate in the near term. Enterprise customers report 40% productivity gains with Copilot adoption."
+  },
+  {
+    "id": "news_005",
+    "ticker": "GOOGL",
+    "title": "Google DeepMind's Gemini Ultra Gains Traction in Enterprise; Search Market Share Holds Steady",
+    "source": "Financial Times",
+    "author": "Anika Sharma",
+    "publishedAt": "2025-02-13T07:30:00Z",
+    "content": "Alphabet's Google DeepMind division reported that enterprise API calls to Gemini Ultra surpassed 500 billion tokens per month, a 3x increase since the model's commercial launch six months ago. Google's share of the global search market remains above 89%, dispelling near-term fears around Microsoft Bing's AI-powered challenge. YouTube advertising revenue grew 18% year-over-year, its fastest pace in two years, driven by AI-optimized ad targeting. However, analysts flagged a risk from potential antitrust rulings in the US Department of Justice's ongoing search monopoly case, which could require Google to divest its default search agreements — a scenario that represents the primary bear case with an estimated 15-20% earnings impact."
+  },
+  {
+    "id": "news_006",
+    "ticker": "AMZN",
+    "title": "Amazon AWS Launches Trainium3 Chip, Cuts AI Training Costs by 50%",
+    "source": "TechCrunch",
+    "author": "David Nguyen",
+    "publishedAt": "2025-02-09T16:00:00Z",
+    "content": "Amazon Web Services unveiled its third-generation custom AI training chip, Trainium3, at the re:Invent Cloud conference. The chip delivers a claimed 50% reduction in training costs per token compared to NVIDIA's H100, enabling Amazon to aggressively price large-scale model training workloads. AWS CEO Matt Garman announced partnerships with Anthropic (Claude), Cohere, and Meta (Llama) to natively optimize their models on Trainium3 infrastructure. Amazon's retail segment is also deploying generative AI for dynamic pricing algorithms, which internal tests show increasing gross merchandise value by 7-9%. AWS revenue is expected to eclipse $150 billion in FY2025, with operating margins expanding to 38%."
+  },
+  {
+    "id": "news_007",
+    "ticker": "META",
+    "title": "Meta's Llama 4 Open-Source Release Disrupts AI Market; Ad Revenue Forecast Raised",
+    "source": "The Verge",
+    "author": "Priya Rajan",
+    "publishedAt": "2025-02-14T10:20:00Z",
+    "content": "Meta Platforms released Llama 4, its most capable open-source large language model, with performance benchmarks rivaling GPT-4 Turbo on most reasoning tasks. The release triggered significant pricing pressure on proprietary AI APIs across the industry. Internally, Meta's AI-powered ad recommendations engine is delivering 28% higher click-through rates for advertisers, directly contributing to an 18% increase in average revenue per user in North America. The company's Reality Labs division posted a narrowing operating loss of $4.2 billion, with the Quest 4 mixed reality headset shipping earlier than anticipated. CEO Mark Zuckerberg reiterated a $60 billion capex commitment to AI infrastructure for 2025, signaling continued aggressive investment."
+  },
+  {
+    "id": "news_008",
+    "ticker": "JPM",
+    "title": "JPMorgan Reports Record Trading Revenue; AI Risk Models Reduce Loan Losses by $1.2B",
+    "source": "Reuters",
+    "author": "Michael Torres",
+    "publishedAt": "2025-02-07T13:00:00Z",
+    "content": "JPMorgan Chase reported a record $8.4 billion in equity and fixed income trading revenue for Q4 2024, driven by elevated market volatility and strong client flows. The bank's proprietary AI-driven credit risk models, trained on 15 years of historical loan data, enabled early identification of 3,400 potentially defaulting commercial real estate loans, allowing proactive restructuring and resulting in $1.2 billion in averted losses. CEO Jamie Dimon highlighted AI as a core strategic priority, with 200,000 employees now using AI-augmented workflows. Net interest income guidance for 2025 was raised to $91 billion, above the consensus of $89 billion, reflecting expectations for a shallower Federal Reserve rate-cutting cycle."
+  },
+  {
+    "id": "news_009",
+    "ticker": "NFLX",
+    "title": "Netflix Ad-Supported Tier Reaches 40M Monthly Active Users; Live Sports Strategy Accelerates",
+    "source": "Variety",
+    "author": "Sophie Anderson",
+    "publishedAt": "2025-02-15T09:45:00Z",
+    "content": "Netflix announced that its advertising-supported subscription tier has reached 40 million monthly active users globally, growing 80% year-over-year after major pricing changes pushed cost-conscious subscribers toward the ad tier. The company's CPM rates for advertising are now competitive with premium linear television at $55-65 per thousand impressions. Netflix secured rights to stream 52 NFL games annually starting in 2026, adding to its existing NBA and Formula 1 partnerships. Content spending for 2025 is guided at $18 billion, with AI-assisted scriptwriting and production planning tools expected to reduce average content production costs by 12%. Subscriber churn dropped to a record low of 1.9% monthly."
+  },
+  {
+    "id": "news_010",
+    "ticker": "AMD",
+    "title": "AMD Instinct MI350 GPU Beats NVIDIA H200 on Inference Benchmarks; Market Share Gains Accelerate",
+    "source": "AnandTech / Reuters",
+    "author": "Kevin Chen",
+    "publishedAt": "2025-02-16T08:00:00Z",
+    "content": "Advanced Micro Devices released benchmark results for its upcoming Instinct MI350 accelerator, demonstrating 15% better inference throughput per watt compared to NVIDIA's H200 GPU on the MLPerf Inference benchmark suite. Microsoft Azure announced it will deploy 20,000 MI350 units in its new East US data center region, representing AMD's largest hyperscaler design win to date. AMD's data center GPU revenue is projected to reach $12 billion in FY2025, capturing approximately 14% of the total AI accelerator market — up from 7% in FY2024. CEO Lisa Su reiterated confidence in ROCm software ecosystem improvements, which have historically been AMD's primary competitive weakness versus NVIDIA's CUDA platform."
+  }
+]
