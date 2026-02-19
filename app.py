@@ -573,8 +573,8 @@ with tab1:
                                 result = st.session_state.paper_portfolio.execute_trade(
                                     ticker=ticker,
                                     direction=sig.position,
-                                    price=sig.entry_price,
-                                    size_pct=sig.position_size_pct,
+                                    entry_price=sig.entry_price,
+                                    position_size_pct=sig.position_size_pct,
                                     stop_loss=sig.stop_loss_price,
                                     take_profit=sig.take_profit_price,
                                     ai_signal=sig.direction,
@@ -955,7 +955,7 @@ with tab6:
     if st.button("📊 Update Sentiment Heatmap"):
         with st.spinner("Scanning social & news..."):
             for t in ALL_TICKERS:
-                st.session_state.sentiment_tracker.get_ticker_sentiment(t)
+                st.session_state.sentiment_tracker.get_combined_sentiment(t)
     
     # Fetch latest scores
     scores = get_sentiment_history(DB_PATH)
@@ -1003,7 +1003,7 @@ with tab7:
             else:
                 if st.button("🤖 Generate Gemini Critique"):
                     with st.spinner("AI is analyzing your strategy..."):
-                        res = st.session_state.ai_coach.generate_journal_critique(sel_t)
+                        res = st.session_state.ai_coach.generate_journal_entry(sel_t)
                         st.markdown(f'<div class="rag-box">{res}</div>', unsafe_allow_html=True)
     
     with coach_tab2:
@@ -1022,12 +1022,12 @@ with tab7:
 
     with coach_tab3:
         st.markdown("#### 🧬 Trading DNA")
-        dna = st.session_state.ai_coach.get_trader_dna()
+        dna = st.session_state.ai_coach.calculate_trading_dna()
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Risk Profile", dna["risk_profile"])
-        c2.metric("Edge Quality", f"{dna['edge_score']:.1f}/10")
-        c3.metric("Discipline Score", f"{dna['discipline_score']:.1f}/10")
+        c1.metric("Risk Profile", dna.get("Risk", "N/A"))
+        c2.metric("Edge Quality", f"{dna.get('Accuracy', 0):.1f}/100")
+        c3.metric("Discipline Score", f"{dna.get('Discipline', 0):.1f}/100")
         
         # DNA Chart
         df_dna = pd.DataFrame({

@@ -857,15 +857,23 @@ def save_journal_entry(db_path: str, journal: dict) -> str:
     return journal_id
 
 
-def get_journals(db_path: str, ticker: Optional[str] = None) -> list[dict]:
+def get_journals(db_path: str, ticker: Optional[str] = None, trade_id: Optional[str] = None) -> list[dict]:
     """Fetch trade journal entries."""
     conn = get_connection(db_path)
     try:
         sql = "SELECT * FROM trade_journals"
         params = []
+        conditions = []
         if ticker:
-            sql += " WHERE ticker = ?"
-            params.append(ticker.upper())
+            conditions.append("ticker = ?")
+            params.append(ticker)
+        if trade_id:
+            conditions.append("trade_id = ?")
+            params.append(trade_id)
+        
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        
         sql += " ORDER BY created_at DESC"
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
