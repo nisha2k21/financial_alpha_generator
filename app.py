@@ -38,12 +38,24 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-GEMINI_KEY  = os.getenv("GEMINI_API_KEY", "")
-NEWS_KEY    = os.getenv("NEWS_API_KEY", "")
-DB_PATH     = os.getenv("SQLITE_DB_PATH", str(ROOT_DIR / "data" / "alpha_signals.db"))
-CHROMA_DIR  = os.getenv("CHROMA_PERSIST_DIR", str(ROOT_DIR / "chroma_db"))
-GEMINI_OK   = bool(GEMINI_KEY and not GEMINI_KEY.startswith("your_"))
-NEWS_OK     = bool(NEWS_KEY  and not NEWS_KEY.startswith("your_"))
+# Read from st.secrets (Streamlit Community Cloud) or .env (local dev)
+def _secret(key: str, default: str = "") -> str:
+    try:
+        return st.secrets.get(key, os.getenv(key, default))  # type: ignore[attr-defined]
+    except Exception:
+        return os.getenv(key, default)
+
+GEMINI_KEY = _secret("GEMINI_API_KEY")
+NEWS_KEY   = _secret("NEWS_API_KEY")
+
+# On cloud use /tmp (writable ephemeral volume), locally use project dir
+_IS_CLOUD  = os.getenv("HOME", "").startswith("/home/") or os.path.exists("/mount/src")
+_DATA_ROOT = Path("/tmp") if _IS_CLOUD else ROOT_DIR
+DB_PATH    = os.getenv("SQLITE_DB_PATH",  str(_DATA_ROOT / "data" / "alpha_signals.db"))
+CHROMA_DIR = os.getenv("CHROMA_PERSIST_DIR", str(_DATA_ROOT / "chroma_db"))
+
+GEMINI_OK  = bool(GEMINI_KEY and not GEMINI_KEY.startswith("your_"))
+NEWS_OK    = bool(NEWS_KEY   and not NEWS_KEY.startswith("your_"))
 
 ALL_TICKERS = ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "JPM", "NFLX", "AMD"]
 
