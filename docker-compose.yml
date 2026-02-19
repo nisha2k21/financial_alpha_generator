@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  alpha_generator:
+    build: .
+    container_name: financial_alpha_generator
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+    restart: unless-stopped

@@ -108,10 +108,42 @@ NEWS_API_KEY=your_newsapi_key_here
 ### 4. Run the dashboard
 
 ```bash
-streamlit run app.py
+Open [http://localhost:8501](http://localhost:8501) in your browser.
+
+---
+
+## 🐳 Docker Deployment
+
+For universal deployment (GCP, AWS, Azure, DigitalOcean), use the included Docker configuration:
+
+### 1. Build the image
+```bash
+docker build -t alpha-generator .
 ```
 
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+### 2. Run with Docker Compose
+```bash
+docker-compose up -d
+```
+The app will be available at `http://localhost:8501`. Ensure your `.env` file is populated.
+
+---
+
+## ☁️ Streamlit Community Cloud
+
+The easiest way to deploy for free:
+
+1. Fork this repository to your GitHub account.
+2. Sign in to [Streamlit Cloud](https://share.streamlit.io/).
+3. Click **"New app"** and select your repository.
+4. **Crucial:** Go to **Advanced settings > Secrets** and paste your `.env` contents:
+   ```toml
+   GEMINI_API_KEY = "your_key"
+   NEWS_API_KEY = "your_key"
+   REDDIT_CLIENT_ID = "your_id"
+   # ... etc
+   ```
+5. Click **Deploy!**
 
 ---
 
