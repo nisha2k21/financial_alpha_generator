@@ -421,11 +421,12 @@ st.markdown(
 )
 st.divider()
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Alpha Dashboard",
     "🧠 AI Research Assistant",
     "🗄️ Signal History",
     "❓ How It Works",
+    "📉 Backtest",
 ])
 
 
@@ -991,3 +992,242 @@ bq load \\
                 f"</div>",
                 unsafe_allow_html=True,
             )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 5 — BACKTEST
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab5:
+    st.markdown(
+        "<h2 style='font-size:1.4rem; font-weight:700; margin-bottom:4px;'>"
+        "📉 Strategy Backtest — 1 Year</h2>"
+        "<p style='color:#64748b; font-size:0.83rem; margin-top:0;'>"
+        "RSI(14) + MA20/MA50 crossover signal · Long-only · 0.1% transaction cost · "
+        "vs equal-weight buy-and-hold benchmark</p>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Controls ──────────────────────────────────────────────────────────────
+    bt_col1, bt_col2, bt_col3 = st.columns([2, 1, 1])
+    with bt_col1:
+        bt_tickers = st.multiselect(
+            "Tickers to backtest",
+            ALL_TICKERS,
+            default=["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL"],
+            key="bt_tickers",
+        )
+    with bt_col2:
+        bt_longonly = st.toggle("Long-only mode", value=True, key="bt_long")
+    with bt_col3:
+        bt_tc = st.selectbox(
+            "Transaction cost",
+            [0.0, 0.001, 0.002, 0.005],
+            index=1,
+            format_func=lambda x: f"{x*100:.1f}%",
+            key="bt_tc",
+        )
+
+    run_bt = st.button("▶ Run Backtest", type="primary", key="run_bt", use_container_width=True)
+
+    if run_bt or "bt_result" in st.session_state:
+        if run_bt:
+            if not bt_tickers:
+                st.warning("Select at least one ticker.")
+                st.stop()
+
+            with st.spinner("Fetching 1 year of price data and running simulation…"):
+                try:
+                    from src.backtest import run_backtest
+                    bt_result, bt_sim = run_backtest(
+                        tickers=bt_tickers,
+                        period="1y",
+                        long_only=bt_longonly,
+                        transaction_cost=bt_tc,
+                    )
+                    st.session_state["bt_result"] = bt_result
+                    st.session_state["bt_sim"] = bt_sim
+                except Exception as e:
+                    st.error(f"Backtest failed: {e}")
+                    st.stop()
+
+        bt_result = st.session_state["bt_result"]
+        bt_sim    = st.session_state["bt_sim"]
+
+        # ── Section: Performance Summary ──────────────────────────────────────
+        st.markdown("### 📊 Performance Summary")
+
+        def _color(val: float) -> str:
+            return "#10b981" if val >= 0 else "#ef4444"
+
+        def _metric_card(label: str, value: str, subtext: str = "", color: str = "#f1f5f9") -> str:
+            return (
+                f"<div style='background:#0f1929; border:1px solid #1e293b; border-radius:10px; "
+                f"padding:1rem 1.2rem; margin-bottom:0.5rem;'>"
+                f"<div style='font-size:0.72rem; color:#64748b; font-weight:600; text-transform:uppercase; "
+                f"letter-spacing:0.05em;'>{label}</div>"
+                f"<div style='font-size:1.6rem; font-weight:800; color:{color}; margin:2px 0;'>{value}</div>"
+                f"<div style='font-size:0.75rem; color:#475569;'>{subtext}</div>"
+                f"</div>"
+            )
+
+        row1 = st.columns(4)
+        row2 = st.columns(4)
+
+        tr   = bt_result.total_return
+        cagr = bt_result.cagr
+        sr   = bt_result.sharpe_ratio
+        md   = bt_result.max_drawdown
+        so   = bt_result.sortino_ratio
+        cal  = bt_result.calmar_ratio
+        wr   = bt_result.win_rate
+        alp  = bt_result.alpha_vs_benchmark
+
+        with row1[0]:
+            st.markdown(_metric_card(
+                "Total Return", f"{tr*100:+.2f}%",
+                f"Benchmark: {bt_result.bm_total_return*100:+.2f}%",
+                _color(tr)), unsafe_allow_html=True)
+        with row1[1]:
+            st.markdown(_metric_card(
+                "CAGR", f"{cagr*100:+.2f}%",
+                "Compound Annual Growth Rate",
+                _color(cagr)), unsafe_allow_html=True)
+        with row1[2]:
+            sr_color = "#10b981" if sr >= 1 else "#f59e0b" if sr >= 0 else "#ef4444"
+            st.markdown(_metric_card(
+                "Sharpe Ratio", f"{sr:.2f}",
+                "≥1 Good · ≥2 Excellent · <0 Bad",
+                sr_color), unsafe_allow_html=True)
+        with row1[3]:
+            st.markdown(_metric_card(
+                "Max Drawdown", f"{md*100:.2f}%",
+                f"Benchmark: {bt_result.bm_max_drawdown*100:.2f}%",
+                _color(md)), unsafe_allow_html=True)
+
+        with row2[0]:
+            st.markdown(_metric_card(
+                "Sortino Ratio", f"{so:.2f}",
+                "Downside-adjusted Sharpe",
+                "#10b981" if so >= 1 else "#f59e0b"), unsafe_allow_html=True)
+        with row2[1]:
+            st.markdown(_metric_card(
+                "Calmar Ratio", f"{cal:.2f}",
+                "CAGR / Max Drawdown",
+                "#10b981" if cal >= 0.5 else "#f59e0b"), unsafe_allow_html=True)
+        with row2[2]:
+            st.markdown(_metric_card(
+                "Win Rate", f"{wr*100:.1f}%",
+                f"Avg Win: {bt_result.avg_win*100:+.2f}% | Avg Loss: {bt_result.avg_loss*100:+.2f}%",
+                "#10b981" if wr >= 0.5 else "#f59e0b"), unsafe_allow_html=True)
+        with row2[3]:
+            st.markdown(_metric_card(
+                "Alpha vs Benchmark", f"{alp*100:+.2f}%",
+                f"Beta: {bt_result.beta:.2f}",
+                _color(alp)), unsafe_allow_html=True)
+
+        # ── Section: Extra stats row ───────────────────────────────────────────
+        st.markdown("---")
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("Ann. Volatility", f"{bt_result.volatility_ann*100:.2f}%",
+                  f"BM: {bt_result.bm_volatility_ann*100:.2f}%")
+        s2.metric("Best Day",  f"{bt_result.best_day*100:+.2f}%")
+        s3.metric("Worst Day", f"{bt_result.worst_day*100:+.2f}%")
+        s4.metric("BM Sharpe", f"{bt_result.bm_sharpe:.2f}")
+        s5.metric("Risk-Free Rate", "5.00% p.a.")
+
+        # ── Section: Equity Curve ─────────────────────────────────────────────
+        st.markdown("### 📈 Equity Curve vs Benchmark")
+        dates = pd.to_datetime(bt_sim["date"])
+        fig_eq = go.Figure()
+        fig_eq.add_trace(go.Scatter(
+            x=dates, y=bt_result.equity_curve, name="Strategy",
+            line=dict(color="#3b82f6", width=2.5),
+            fill="tozeroy", fillcolor="rgba(59,130,246,0.07)",
+        ))
+        fig_eq.add_trace(go.Scatter(
+            x=dates, y=bt_result.bm_equity_curve, name="Benchmark (E/W B&H)",
+            line=dict(color="#f59e0b", width=1.8, dash="dot"),
+        ))
+        fig_eq.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#f1f5f9"),
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis=dict(title="Portfolio Value ($)", gridcolor="rgba(255,255,255,0.04)"),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+            legend=dict(bgcolor="rgba(0,0,0,0)"),
+            hovermode="x unified",
+            height=320,
+        )
+        st.plotly_chart(fig_eq, use_container_width=True)
+
+        # ── Section: Drawdown ─────────────────────────────────────────────────
+        st.markdown("### 📉 Drawdown")
+        fig_dd = go.Figure()
+        fig_dd.add_trace(go.Scatter(
+            x=dates, y=bt_result.drawdown_curve * 100,
+            name="Strategy", line=dict(color="#ef4444", width=2),
+            fill="tozeroy", fillcolor="rgba(239,68,68,0.12)",
+        ))
+        fig_dd.add_trace(go.Scatter(
+            x=dates, y=bt_result.bm_drawdown_curve * 100,
+            name="Benchmark", line=dict(color="#f59e0b", width=1.4, dash="dot"),
+        ))
+        fig_dd.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#f1f5f9"),
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis=dict(title="Drawdown (%)", gridcolor="rgba(255,255,255,0.04)"),
+            xaxis=dict(gridcolor="rgba(255,255,255,0.04)"),
+            legend=dict(bgcolor="rgba(0,0,0,0)"),
+            hovermode="x unified",
+            height=240,
+        )
+        st.plotly_chart(fig_dd, use_container_width=True)
+
+        # ── Section: Monthly Returns ──────────────────────────────────────────
+        if not bt_result.monthly_returns.empty:
+            st.markdown("### 🗓️ Monthly Returns")
+            df_m = bt_result.monthly_returns.copy()
+            df_m["return_pct"] = (df_m["return"] * 100).round(2)
+            df_m["month_year"] = df_m["date"].dt.strftime("%b %Y")
+            df_m["color"]      = df_m["return_pct"].apply(
+                lambda x: f"{'🟢' if x >= 0 else '🔴'} {x:+.2f}%"
+            )
+            display_m = df_m[["month_year", "return_pct", "color"]].copy()
+            display_m.columns = ["Month", "Return (%)", "Signal"]
+            display_m = display_m.reset_index(drop=True)
+
+            st.dataframe(
+                display_m.style.applymap(
+                    lambda v: "color:#10b981; font-weight:600;" if isinstance(v, float) and v >= 0
+                    else ("color:#ef4444; font-weight:600;" if isinstance(v, float) else ""),
+                    subset=["Return (%)"]
+                ),
+                use_container_width=True,
+                hide_index=True,
+                height=320,
+            )
+
+        # ── Disclaimer ────────────────────────────────────────────────────────
+        st.markdown(
+            "<div style='background:#0f1929; border:1px solid #f59e0b40; border-radius:8px; "
+            "padding:0.9rem 1.1rem; margin-top:1rem; font-size:0.78rem; color:#94a3b8;'>"
+            "⚠️ <b>Disclaimer:</b> This backtest uses a rule-based RSI+MA signal as a proxy for the "
+            "AI-generated alpha signals. Past performance does not guarantee future results. "
+            "No slippage or market-impact modelling applied. For research purposes only."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<div style='text-align:center; padding:4rem; color:#475569;'>"
+            "<div style='font-size:3rem;'>📉</div>"
+            "<div style='font-size:1.1rem; font-weight:600; margin-top:0.5rem;'>Run the 1-Year Backtest</div>"
+            "<div style='font-size:0.85rem; margin-top:0.5rem;'>Select tickers above and click "
+            "<b>▶ Run Backtest</b> to simulate strategy performance.</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
