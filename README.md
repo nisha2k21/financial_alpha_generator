@@ -11,92 +11,137 @@
 
 ---
 
-## 🔍 What is this?
-The **AI Financial Alpha Generator** is a next-generation decision-support tool for traders and analysts. It leverages **Gemini 1.5 Pro** and **Retrieval-Augmented Generation (RAG)** to transform raw financial news into actionable, citation-backed alpha signals. 
+## 🧠 What Is This?
 
-Unlike traditional platforms that rely solely on lagging indicators, this engine reads the news through the eyes of a senior quantitative analyst, cross-references it with technical data, and provides structured trade recommendations with explicit reasoning.
+Traditional alpha generation relies on hand-crafted rules and lagging indicators. This project replaces that with a **Retrieval-Augmented Generation (RAG)** architecture: financial news is ingested, embedded into a vector store, and queried by Gemini 1.5 Pro — which acts as a **senior quantitative analyst** — to generate structured, evidence-based trading signals.
 
----
-
-## ⚙️ How it Works
-The application follows a 4-stage intelligent pipeline:
-
-1.  **Ingestion Layer**: Real-time news is fetched via NewsAPI and financial data via yfinance. The system calculates core technical indicators (RSI, MA20, Volume Change).
-2.  **Semantic Processing**: Raw text is chunked and embedded into a **ChromaDB** vector store using Google's 768-dimensional embedding models. Each chunk is also scored for sentiment using TextBlob.
-3.  **RAG Pipeline**: When you analyze a ticker, Gemini 1.5 Pro performs a semantic search across the news embeddings. It retrieves the most relevant catalysts, risks, and narratives to form a basis for its analysis.
-4.  **Signal Generation**: The LLM output is parsed into a structured `AlphaSignal`. This signal is then "tempered" by the technical engine—if the AI is bullish but RSI indicates an overbought state, the confidence score is automatically adjusted to prevent "hallucinated" buys.
+The result is a suite of scalable, explainable, and citation-backed alpha signals that blend LLM reasoning with quantitative technical confirmation (RSI, MA20, volume analysis).
 
 ---
 
-## 🏗️ Core Functionality
-The application is organized into 5 intuitive modules:
+## 💡 Why This Project? & How It Differs
 
-1.  **📊 Alpha Dashboard**: View live signals (Strong Buy to Strong Sell), confidence percentages, and citation-backed reasoning. Execute one-click virtual paper trades with automated stop-loss and take-profit targets.
-2.  **🧠 AI Research Assistant**: A dedicated RAG interface where you can ask complex questions (e.g., *"How do NVDA's Q3 guidance and recent AI chip delays impact the short-term signal?"*) and get cited answers.
-3.  **💰 Paper Trading**: Manage your virtual $100k portfolio. Track open positions, unrealized PnL, and win rates in real-time.
-4.  **🗄️ Signal History**: A permanent SQLite audit trail of every signal ever generated, allowing you to export data and review performance over time.
-5.  **❓ How It Works**: An interactive map of the pipeline architecture and scaling guides.
+Most trading bots use either pure Technical Analysis (TA) or basic Sentiment Analysis. This project differs by:
 
----
-
-## 💎 How it Differs from Other Tools
-*   **Explainable AI (XAI)**: Most black-box AI tools give you a "Buy" signal without context. This tool gives you the exact news headlines it used to reach that conclusion.
-*   **Narrative + Technical Hybrid**: It doesn't just look at charts. It understands the "Story" (Earnings, M&A, Product Launches) and uses charts only to confirm entries.
-*   **Zero Retraining Needed**: By using RAG, the "brain" stays fresh. As soon as a news article is ingested, the AI knows about it—no fine-tuning required.
-*   **Local Privacy**: Uses ChromaDB for local vector storage, ensuring your research history stays on your machine.
+1.  **Explainable AI (XAI)**: Instead of a "black box" prediction, the agent provides full reasoning, citing specific news articles as evidence for its bias.
+2.  **Contextual Awareness**: It doesn't just see a "high RSI"; it understands *why* the price moved (e.g., an earnings beat vs. a speculative rumor) by analyzing news first.
+3.  **Hybrid Confidence**: A signal is only marked as "Strong" if both the AI narrative (qualitative) and the technical indicators (quantitative) align.
+4.  **No Re-training Required**: Unlike traditional ML, this uses RAG. Add new news, and the system immediately "knows" the current market state without expensive retraining.
 
 ---
 
-## 💡 Key Insights You Get
-*   **Catalyst Identification**: Quickly find the *reason* behind a price move without reading 50 articles.
-*   **Sentiment Divergence**: Spot when the news is purely hype but technicals (like declining volume) suggest a reversal.
-*   **Risk-Adjusted Parameters**: Get precise, volatility-aware Entry, Stop-Loss, and Take-Profit levels for every signal.
+## 🚀 Functions & Key Features
+
+-   **📊 Alpha Dashboard**: Live signal cards showing strength, direction (Long/Short), and technical context (RSI, MA, Vol).
+-   **🧠 AI Research Assistant**: A streaming Q&A interface to query your private news database using natural language.
+-   **💰 Paper Trading**: Execute virtual trades based on AI signals to track performance in a risk-free environment.
+-   **🗄️ Signal History**: A full audit log of every signal generated, stored in a BigQuery-ready SQLite database.
+-   **❓ How It Works**: Transparent documentation of the ingestion, embedding, and inference pipeline.
+
+---
+
+## 🏗️ Architecture & How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     AI Financial Alpha Generator                            │
+│                                                                             │
+│  ┌──────────┐   ┌───────────┐   ┌────────────┐   ┌────────────────────┐   │
+│  │ NewsAPI  │   │ yfinance  │   │  TextBlob  │   │  ta (RSI/MA20/Vol) │   │
+│  └────┬─────┘   └─────┬─────┘   └─────┬──────┘   └────────┬───────────┘   │
+│       │               │               │                    │               │
+│       ▼               ▼               ▼                    ▼               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │              INGESTION LAYER  (ingestion.py)                        │   │
+│  │  Fetch news → format as LangChain Documents → compute indicators    │   │
+│  └──────────────────────────┬──────────────────────────────────────────┘   │
+│                             │                                               │
+│                             ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │           EMBEDDINGS LAYER  (embeddings.py)                         │   │
+│  │  Chunk: 500 tokens / 50-token overlap                               │   │
+│  │  Sentiment: TextBlob polarity scored per chunk                      │   │
+│  │  Embed: Google models/embedding-001 → ChromaDB                      │   │
+│  └──────────────────────────┬──────────────────────────────────────────┘   │
+│                             │                                               │
+│                             ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │              RAG PIPELINE  (rag_pipeline.py)                        │   │
+│  │  Retriever: ChromaDB top-5 similarity search                        │   │
+│  │  LLM: Gemini 1.5 Pro (temp=0.1, quant analyst system prompt)       │   │
+│  │  Output: Strong Buy / Buy / Neutral / Sell / Strong Sell            │   │
+│  └──────────────────────────┬──────────────────────────────────────────┘   │
+│                             │                                               │
+│                             ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │            ALPHA ENGINE  (alpha_engine.py)                          │   │
+│  │  Parse response → AlphaSignal dataclass                             │   │
+│  │  Adjust confidence: RSI + volume technical confirmation             │   │
+│  │  Persist to SQLite (BigQuery-compatible schema)                     │   │
+│  └──────────────────────────┬──────────────────────────────────────────┘   │
+│                             │                                               │
+│                             ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │          STREAMLIT DASHBOARD  (app.py)  — 5 Pages                   │   │
+│  │  1. Alpha Dashboard  2. AI Research  3. Paper Trading               │   │
+│  │  4. Signal History  5. How It Works                                 │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📊 Insights You Gain
+
+-   **Deep Correlation**: Understand how specific news events (e.g., a regulatory filing or CEO tweet) correlate with technical breakouts.
+-   **Narrative Sentiment**: Identify when market sentiment is shifting before it fully reflects in the lagging price indicators.
+-   **Risk Identification**: The AI specifically looks for "Downside Risks" in reports that standard TA might miss (e.g., supply chain issues or litigation).
 
 ---
 
 ## 🎯 Why & When to Use This?
-**Use this when:**
-*   You are overwhelmed by financial news and need a summary of what actually matters.
-*   You want to verify your "gut feel" with a senior AI analyst that ignores emotional bias.
-*   You need to back-audit your trading decisions using the Signal History.
 
-**Why use it?**
-To reduce cognitive load. Instead of spending 2 hours researching a ticker, you get a institutional-grade summary and technical confirmation in under 30 seconds.
+-   **Why**: To remove emotional bias from trading and back your decisions with high-fidelity LLM reasoning and real-time news data.
+-   **When to use**:
+    -   **Daily Pre-market Prep**: Scan your watchlists to see which tickers have the strongest AI-backed momentum.
+    -   **Trade Auditing**: Before entering a technical setup, use the Research Assistant to cross-reference news catalysts or "Red Flags."
+    -   **Strategy Refinement**: Use Paper Trading to validate the AI's "Win Rate" over time before risking real capital.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Installation
+### 1. Clone the repo
 ```bash
 git clone https://github.com/yourusername/financial-alpha-generator.git
 cd financial-alpha-generator
+```
+
+### 2. Install dependencies
+```bash
 pip install -r requirements.txt
 python -m textblob.download_corpora
 ```
 
-### 2. Configuration
-Edit `.env`:
+### 3. Configure API keys
+Edit `.env` (or set in Streamlit Secrets):
 ```env
-GEMINI_API_KEY=your_gemini_api_key_here
-NEWS_API_KEY=your_newsapi_key_here
+GEMINI_API_KEY=your_key
+NEWS_API_KEY=your_key
 ```
 
-### 3. Run
+### 4. Run Locally
 ```bash
 streamlit run app.py
 ```
 
 ---
 
-## 🛠️ Tech Stack
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **LLM** | Gemini 1.5 Pro | Deep reasoning & alpha generation |
-| **Vector Store** | ChromaDB | Semantic search & news retrieval |
-| **Data** | yfinance & NewsAPI | Market data & real-time narratives |
-| **State** | LangChain LCEL | Pipeline orchestration |
-| **DB** | SQLite | Persistent audit trail |
+## 🧪 Testing
+```bash
+pytest tests/test_pipeline.py -v
+# 52 unit tests for schema, technicals, and RAG logic
+```
 
 ---
 
